@@ -1,0 +1,506 @@
+{
+  "segments": [
+    {
+      "start_seconds": 0,
+      "end_seconds": 300,
+      "label": "افتتاحية البرنامج"
+    },
+    {
+      "start_seconds": 300,
+      "end_seconds": 620,
+      "label": "حديث الدعم السكني"
+    },
+    {
+      "start_seconds": 620,
+      "end_seconds": 900,
+      "label": "فقرة رياضية"
+    },
+    {
+      "start_seconds": 900,
+      "end_seconds": 1200,
+      "label": "ختام ولقاء الجمهور"
+    }
+  ],
+  "signal": [
+    {
+      "timestamp_seconds": 0,
+      "engagement_level": 21.3
+    },
+    {
+      "timestamp_seconds": 10,
+      "engagement_level": 18.2
+    },
+    {
+      "timestamp_seconds": 20,
+      "engagement_level": 25.0
+    },
+    {
+      "timestamp_seconds": 30,
+      "engagement_level": 14.7
+    },
+    {
+      "timestamp_seconds": 40,
+      "engagement_level": 12.5
+    },
+    {
+      "timestamp_seconds": 50,
+      "engagement_level": 23.5
+    },
+    {
+      "timestamp_seconds": 60,
+      "engagement_level": 24.5
+    },
+    {
+      "timestamp_seconds": 70,
+      "engagement_level": 18.5
+    },
+    {
+      "timestamp_seconds": 80,
+      "engagement_level": 24.8
+    },
+    {
+      "timestamp_seconds": 90,
+      "engagement_level": 24.0
+    },
+    {
+      "timestamp_seconds": 100,
+      "engagement_level": 19.3
+    },
+    {
+      "timestamp_seconds": 110,
+      "engagement_level": 24.8
+    },
+    {
+      "timestamp_seconds": 120,
+      "engagement_level": 16.4
+    },
+    {
+      "timestamp_seconds": 130,
+      "engagement_level": 25.8
+    },
+    {
+      "timestamp_seconds": 140,
+      "engagement_level": 18.7
+    },
+    {
+      "timestamp_seconds": 150,
+      "engagement_level": 25.3
+    },
+    {
+      "timestamp_seconds": 160,
+      "engagement_level": 22.8
+    },
+    {
+      "timestamp_seconds": 170,
+      "engagement_level": 22.0
+    },
+    {
+      "timestamp_seconds": 180,
+      "engagement_level": 20.9
+    },
+    {
+      "timestamp_seconds": 190,
+      "engagement_level": 26.8
+    },
+    {
+      "timestamp_seconds": 200,
+      "engagement_level": 20.2
+    },
+    {
+      "timestamp_seconds": 210,
+      "engagement_level": 19.7
+    },
+    {
+      "timestamp_seconds": 220,
+      "engagement_level": 20.8
+    },
+    {
+      "timestamp_seconds": 230,
+      "engagement_level": 21.3
+    },
+    {
+      "timestamp_seconds": 240,
+      "engagement_level": 13.6
+    },
+    {
+      "timestamp_seconds": 250,
+      "engagement_level": 18.5
+    },
+    {
+      "timestamp_seconds": 260,
+      "engagement_level": 20.4
+    },
+    {
+      "timestamp_seconds": 270,
+      "engagement_level": 16.4
+    },
+    {
+      "timestamp_seconds": 280,
+      "engagement_level": 22.3
+    },
+    {
+      "timestamp_seconds": 290,
+      "engagement_level": 15.5
+    },
+    {
+      "timestamp_seconds": 300,
+      "engagement_level": 18.9
+    },
+    {
+      "timestamp_seconds": 310,
+      "engagement_level": 20.9
+    },
+    {
+      "timestamp_seconds": 320,
+      "engagement_level": 25.1
+    },
+    {
+      "timestamp_seconds": 330,
+      "engagement_level": 16.6
+    },
+    {
+      "timestamp_seconds": 340,
+      "engagement_level": 21.0
+    },
+    {
+      "timestamp_seconds": 350,
+      "engagement_level": 17.3
+    },
+    {
+      "timestamp_seconds": 360,
+      "engagement_level": 23.7
+    },
+    {
+      "timestamp_seconds": 370,
+      "engagement_level": 23.0
+    },
+    {
+      "timestamp_seconds": 380,
+      "engagement_level": 16.1
+    },
+    {
+      "timestamp_seconds": 390,
+      "engagement_level": 20.6
+    },
+    {
+      "timestamp_seconds": 400,
+      "engagement_level": 19.6
+    },
+    {
+      "timestamp_seconds": 410,
+      "engagement_level": 21.3
+    },
+    {
+      "timestamp_seconds": 420,
+      "engagement_level": 22.4
+    },
+    {
+      "timestamp_seconds": 430,
+      "engagement_level": 23.9
+    },
+    {
+      "timestamp_seconds": 440,
+      "engagement_level": 76.8
+    },
+    {
+      "timestamp_seconds": 450,
+      "engagement_level": 70.5
+    },
+    {
+      "timestamp_seconds": 460,
+      "engagement_level": 73.9
+    },
+    {
+      "timestamp_seconds": 470,
+      "engagement_level": 76.4
+    },
+    {
+      "timestamp_seconds": 480,
+      "engagement_level": 25.6
+    },
+    {
+      "timestamp_seconds": 490,
+      "engagement_level": 20.5
+    },
+    {
+      "timestamp_seconds": 500,
+      "engagement_level": 14.0
+    },
+    {
+      "timestamp_seconds": 510,
+      "engagement_level": 19.6
+    },
+    {
+      "timestamp_seconds": 520,
+      "engagement_level": 25.7
+    },
+    {
+      "timestamp_seconds": 530,
+      "engagement_level": 20.3
+    },
+    {
+      "timestamp_seconds": 540,
+      "engagement_level": 21.6
+    },
+    {
+      "timestamp_seconds": 550,
+      "engagement_level": 17.8
+    },
+    {
+      "timestamp_seconds": 560,
+      "engagement_level": 16.7
+    },
+    {
+      "timestamp_seconds": 570,
+      "engagement_level": 17.9
+    },
+    {
+      "timestamp_seconds": 580,
+      "engagement_level": 24.5
+    },
+    {
+      "timestamp_seconds": 590,
+      "engagement_level": 19.2
+    },
+    {
+      "timestamp_seconds": 600,
+      "engagement_level": 21.7
+    },
+    {
+      "timestamp_seconds": 610,
+      "engagement_level": 22.5
+    },
+    {
+      "timestamp_seconds": 620,
+      "engagement_level": 19.8
+    },
+    {
+      "timestamp_seconds": 630,
+      "engagement_level": 21.5
+    },
+    {
+      "timestamp_seconds": 640,
+      "engagement_level": 17.0
+    },
+    {
+      "timestamp_seconds": 650,
+      "engagement_level": 20.9
+    },
+    {
+      "timestamp_seconds": 660,
+      "engagement_level": 13.1
+    },
+    {
+      "timestamp_seconds": 670,
+      "engagement_level": 25.4
+    },
+    {
+      "timestamp_seconds": 680,
+      "engagement_level": 22.3
+    },
+    {
+      "timestamp_seconds": 690,
+      "engagement_level": 21.3
+    },
+    {
+      "timestamp_seconds": 700,
+      "engagement_level": 21.0
+    },
+    {
+      "timestamp_seconds": 710,
+      "engagement_level": 21.0
+    },
+    {
+      "timestamp_seconds": 720,
+      "engagement_level": 18.8
+    },
+    {
+      "timestamp_seconds": 730,
+      "engagement_level": 12.4
+    },
+    {
+      "timestamp_seconds": 740,
+      "engagement_level": 20.5
+    },
+    {
+      "timestamp_seconds": 750,
+      "engagement_level": 18.8
+    },
+    {
+      "timestamp_seconds": 760,
+      "engagement_level": 16.3
+    },
+    {
+      "timestamp_seconds": 770,
+      "engagement_level": 17.9
+    },
+    {
+      "timestamp_seconds": 780,
+      "engagement_level": 20.9
+    },
+    {
+      "timestamp_seconds": 790,
+      "engagement_level": 18.4
+    },
+    {
+      "timestamp_seconds": 800,
+      "engagement_level": 17.8
+    },
+    {
+      "timestamp_seconds": 810,
+      "engagement_level": 20.6
+    },
+    {
+      "timestamp_seconds": 820,
+      "engagement_level": 25.0
+    },
+    {
+      "timestamp_seconds": 830,
+      "engagement_level": 23.5
+    },
+    {
+      "timestamp_seconds": 840,
+      "engagement_level": 16.6
+    },
+    {
+      "timestamp_seconds": 850,
+      "engagement_level": 20.6
+    },
+    {
+      "timestamp_seconds": 860,
+      "engagement_level": 24.4
+    },
+    {
+      "timestamp_seconds": 870,
+      "engagement_level": 17.9
+    },
+    {
+      "timestamp_seconds": 880,
+      "engagement_level": 22.0
+    },
+    {
+      "timestamp_seconds": 890,
+      "engagement_level": 15.9
+    },
+    {
+      "timestamp_seconds": 900,
+      "engagement_level": 21.0
+    },
+    {
+      "timestamp_seconds": 910,
+      "engagement_level": 18.9
+    },
+    {
+      "timestamp_seconds": 920,
+      "engagement_level": 15.3
+    },
+    {
+      "timestamp_seconds": 930,
+      "engagement_level": 17.8
+    },
+    {
+      "timestamp_seconds": 940,
+      "engagement_level": 18.8
+    },
+    {
+      "timestamp_seconds": 950,
+      "engagement_level": 21.8
+    },
+    {
+      "timestamp_seconds": 960,
+      "engagement_level": 20.3
+    },
+    {
+      "timestamp_seconds": 970,
+      "engagement_level": 15.5
+    },
+    {
+      "timestamp_seconds": 980,
+      "engagement_level": 20.0
+    },
+    {
+      "timestamp_seconds": 990,
+      "engagement_level": 22.2
+    },
+    {
+      "timestamp_seconds": 1000,
+      "engagement_level": 19.7
+    },
+    {
+      "timestamp_seconds": 1010,
+      "engagement_level": 19.4
+    },
+    {
+      "timestamp_seconds": 1020,
+      "engagement_level": 16.0
+    },
+    {
+      "timestamp_seconds": 1030,
+      "engagement_level": 27.2
+    },
+    {
+      "timestamp_seconds": 1040,
+      "engagement_level": 22.4
+    },
+    {
+      "timestamp_seconds": 1050,
+      "engagement_level": 21.3
+    },
+    {
+      "timestamp_seconds": 1060,
+      "engagement_level": 24.4
+    },
+    {
+      "timestamp_seconds": 1070,
+      "engagement_level": 15.2
+    },
+    {
+      "timestamp_seconds": 1080,
+      "engagement_level": 62.6
+    },
+    {
+      "timestamp_seconds": 1090,
+      "engagement_level": 60.1
+    },
+    {
+      "timestamp_seconds": 1100,
+      "engagement_level": 59.0
+    },
+    {
+      "timestamp_seconds": 1110,
+      "engagement_level": 62.5
+    },
+    {
+      "timestamp_seconds": 1120,
+      "engagement_level": 16.5
+    },
+    {
+      "timestamp_seconds": 1130,
+      "engagement_level": 22.7
+    },
+    {
+      "timestamp_seconds": 1140,
+      "engagement_level": 14.1
+    },
+    {
+      "timestamp_seconds": 1150,
+      "engagement_level": 25.8
+    },
+    {
+      "timestamp_seconds": 1160,
+      "engagement_level": 16.5
+    },
+    {
+      "timestamp_seconds": 1170,
+      "engagement_level": 18.7
+    },
+    {
+      "timestamp_seconds": 1180,
+      "engagement_level": 16.5
+    },
+    {
+      "timestamp_seconds": 1190,
+      "engagement_level": 15.6
+    }
+  ]
+}

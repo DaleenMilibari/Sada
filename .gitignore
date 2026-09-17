@@ -6,3 +6,9 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# Python backend
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/store/pattern_store.json
