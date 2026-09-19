@@ -9,6 +9,7 @@ Python function calls.
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from backend.agents import (
     behavior_analysis_agent,
@@ -18,7 +19,9 @@ from backend.agents import (
     llm_client,
 )
 from backend.schemas import (
+    AwjDiagnosisRequest,
     BroadcastSignalPoint,
+    BroadcastSnapshot,
     ClipOpportunity,
     DraftContent,
     OptimizationResult,
@@ -28,6 +31,13 @@ from backend.schemas import (
 )
 
 app = FastAPI(title="Sada Agent API", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.post("/api/patterns/refresh", response_model=list[Pattern])
@@ -56,6 +66,14 @@ def diagnose_item(item: PublishedItemMetrics):
         raise HTTPException(status_code=503, detail=str(e))
 
 
+@app.post("/api/diagnose/awj-sada", response_model=DiagnosisResult)
+def diagnose_awj_sada(req: AwjDiagnosisRequest):
+    try:
+        return diagnostic_recommendation_agent.diagnose_awj_topic(req.topic)
+    except llm_client.MissingApiKeyError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 @app.post("/api/broadcast/detect-clips", response_model=list[ClipOpportunity])
 def detect_clips(signal: list[BroadcastSignalPoint] | None = None):
     if signal is None:
@@ -63,3 +81,8 @@ def detect_clips(signal: list[BroadcastSignalPoint] | None = None):
     broadcast = live_clip_detection_agent.load_broadcast()
     broadcast["signal"] = [p.model_dump() for p in signal]
     return live_clip_detection_agent.detect_clip_opportunities(broadcast)
+
+
+@app.get("/api/broadcast/signal", response_model=BroadcastSnapshot)
+def get_broadcast_signal():
+    return live_clip_detection_agent.load_broadcast()

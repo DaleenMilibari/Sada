@@ -1,0 +1,82 @@
+{
+  "source": {
+    "title_ar": "بيانات أوج | صدى - حلقات رهان وSO وتفاعل X",
+    "raw_file": "raw/awj_sada_data.json",
+    "note": "Real verified data: 6 podcast episodes (3 رهان + 3 SO) and 5 publicly recovered X posts. No fabricated metrics or reply text - see newData/README_AWJ_Sada.txt for the collection policy. Far too few records for the Welch-t-test pipeline in analyze(); feeds analyze_real_awj_sada instead."
+  },
+  "podcasts": {
+    "رهان": {
+      "episode_count": 3,
+      "episode_keys": [
+        "RAHAN_01",
+        "RAHAN_02",
+        "RAHAN_03"
+      ],
+      "youtube_views_reported": 3,
+      "avg_youtube_views": 10725,
+      "avg_youtube_likes": 246.3
+    },
+    "SO": {
+      "episode_count": 3,
+      "episode_keys": [
+        "SO_01",
+        "SO_02",
+        "SO_03"
+      ],
+      "youtube_views_reported": 1,
+      "avg_youtube_views": 2945,
+      "avg_youtube_likes": null
+    }
+  },
+  "x_by_relationship": {
+    "official account": {
+      "post_count": 1,
+      "record_ids": [
+        "X_RAHAN_01_001"
+      ],
+      "avg_views": 4400,
+      "avg_likes": 6,
+      "avg_reposts": 4
+    },
+    "related amplification tagging @Medhalpodcast": {
+      "post_count": 4,
+      "record_ids": [
+        "X_SO_02_001",
+        "X_SO_02_002",
+        "X_SO_03_001",
+        "X_SO_03_002"
+      ],
+      "avg_views": 1750,
+      "avg_likes": null,
+      "avg_reposts": null
+    }
+  },
+  "audience_signals": [
+    {
+      "record_id": "AUD_RAHAN_001",
+      "podcast": "رهان",
+      "platform": "Apple Podcasts",
+      "scope": "show-level",
+      "date": "2023-10-26",
+      "user": "NeonLight9107",
+      "text": "👍🏼",
+      "aggregate_rating": 4.0,
+      "ratings_count": 7,
+      "source_url": "https://podcasts.apple.com/sa/podcast/%D8%B1%D9%87%D8%A7%D9%86/id1712011308?l=ar",
+      "note": "Public show-level review; not attributed to a specific episode."
+    },
+    {
+      "record_id": "AUD_SO_001",
+      "podcast": "SO",
+      "platform": "Apple Podcasts",
+      "scope": "show-level",
+      "date": "2024-08-23",
+      "user": "Abu Nasser 590",
+      "text": "Beautiful",
+      "aggregate_rating": 5.0,
+      "ratings_count": 2,
+      "source_url": "https://podcasts.apple.com/sa/podcast/so/id1758735087",
+      "note": "Public show-level review; not attributed to a specific episode."
+    }
+  ]
+}

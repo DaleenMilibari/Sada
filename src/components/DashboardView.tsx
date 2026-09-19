@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   TrendingUp, Clock, Zap, Users, BookOpen, BarChart2,
-  Copy, Check, RefreshCw, Sparkles, Video, Award
+  Copy, Check, RefreshCw, Sparkles, Video, Award, Radio, Globe, ShieldCheck
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -10,6 +10,57 @@ import {
 interface DashboardViewProps {
   onNotify?: (title: string, desc?: string, type?: 'success' | 'info') => void;
 }
+
+const API_BASE = 'http://localhost:8000';
+
+// Mirrors backend/schemas.py::Pattern.
+interface ApiPattern {
+  pattern_id: string;
+  pattern: string;
+  supporting_metric: string;
+  confidence: number;
+  affected_content_types: string[];
+  dimension: 'content_type' | 'timing' | 'topic_platform' | 'platform_reach_real' | 'awj_sada_real';
+  slice_key: string;
+  lift_pct: number;
+  source: string;
+}
+
+const DIMENSION_META: Record<ApiPattern['dimension'], { label: string; icon: React.ReactNode; tagColor: string }> = {
+  content_type: {
+    label: 'نوع المحتوى',
+    icon: <Video className="w-4 h-4 text-violet-600" />,
+    tagColor: 'bg-violet-50 text-violet-700 border-violet-200',
+  },
+  timing: {
+    label: 'توقيت',
+    icon: <Clock className="w-4 h-4 text-amber-600" />,
+    tagColor: 'bg-amber-50 text-amber-700 border-amber-200',
+  },
+  topic_platform: {
+    label: 'الموضوع والمنصة',
+    icon: <Award className="w-4 h-4 text-emerald-600" />,
+    tagColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  },
+  platform_reach_real: {
+    label: 'منصات حج 1445هـ',
+    icon: <Globe className="w-4 h-4 text-blue-600" />,
+    tagColor: 'bg-blue-50 text-blue-700 border-blue-200',
+  },
+  awj_sada_real: {
+    label: 'أوج | صدى',
+    icon: <Radio className="w-4 h-4 text-rose-600" />,
+    tagColor: 'bg-rose-50 text-rose-700 border-rose-200',
+  },
+};
+
+const CATEGORY_TABS: { key: 'all' | 'content_type' | 'timing' | 'topic_platform' | 'real'; label: string }[] = [
+  { key: 'all', label: 'الكل' },
+  { key: 'content_type', label: 'نوع المحتوى' },
+  { key: 'timing', label: 'توقيت' },
+  { key: 'topic_platform', label: 'الموضوع والمنصة' },
+  { key: 'real', label: 'بيانات حقيقية' },
+];
 
 const weeklyData = [
   { day: 'الأحد', engagement: 42, reach: 58 },
@@ -21,33 +72,6 @@ const weeklyData = [
   { day: 'السبت', engagement: 78, reach: 91 },
 ];
 
-const patternsList = [
-  {
-    id: '1',
-    icon: <Video className="w-4 h-4 text-violet-600" />,
-    text: 'محتوى الفيديو القصير يحقق 3 أضعاف التفاعل مقارنةً بالصور الثابتة.',
-    category: 'فيديو',
-    tagColor: 'bg-violet-50 text-violet-700 border-violet-200',
-    confidence: '98%',
-  },
-  {
-    id: '2',
-    icon: <Clock className="w-4 h-4 text-amber-600" />,
-    text: 'ينخفض تفاعل الجمهور الرقمي بنسبة 40% بين الساعة 2 و 5 مساءً في أيام العمل الرسمية.',
-    category: 'توقيت',
-    tagColor: 'bg-amber-50 text-amber-700 border-amber-200',
-    confidence: '94%',
-  },
-  {
-    id: '3',
-    icon: <Award className="w-4 h-4 text-emerald-600" />,
-    text: 'المنشورات المصاغة بلهجة محلية تفاعلية تحقق قفزة 25% بالتزامن مع الأحداث الوطنية الحية.',
-    category: 'محلي',
-    tagColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    confidence: '96%',
-  },
-];
-
 const platforms = [
   { name: 'يوتيوب', share: 38, count: '5.4M تفاعل', color: 'bg-red-500', barColor: '#ef4444' },
   { name: 'منصة إكس', share: 29, count: '4.1M تفاعل', color: 'bg-slate-800', barColor: '#1e293b' },
@@ -57,14 +81,33 @@ const platforms = [
 
 export default function DashboardView({ onNotify }: DashboardViewProps) {
   const [period, setPeriod] = useState<'today' | 'week' | 'month'>('week');
-  const [activeCategory, setActiveCategory] = useState<string>('الكل');
+  const [activeCategory, setActiveCategory] = useState<typeof CATEGORY_TABS[number]['key']>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoadingPatterns, setIsLoadingPatterns] = useState(true);
+  const [patterns, setPatterns] = useState<ApiPattern[]>([]);
   const [chartMetric, setChartMetric] = useState<'all' | 'engagement' | 'reach'>('all');
 
-  const filteredPatterns = activeCategory === 'الكل'
-    ? patternsList
-    : patternsList.filter((p) => p.category === activeCategory);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/patterns`);
+        if (!res.ok) throw new Error('patterns fetch failed');
+        setPatterns(await res.json());
+      } catch {
+        onNotify?.('تعذر تحميل مخزن الأنماط', 'تأكد من تشغيل الخادم الخلفي على المنفذ 8000', 'info');
+      } finally {
+        setIsLoadingPatterns(false);
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    })();
+  }, []);
+
+  const filteredPatterns = patterns.filter((p) => {
+    if (activeCategory === 'all') return true;
+    if (activeCategory === 'real') return p.source.startsWith('real_');
+    return p.dimension === activeCategory;
+  });
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard?.writeText(text);
@@ -73,12 +116,19 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setIsRefreshing(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch(`${API_BASE}/api/patterns/refresh`, { method: 'POST' });
+      if (!res.ok) throw new Error('refresh failed');
+      const fresh: ApiPattern[] = await res.json();
+      setPatterns(fresh);
+      onNotify?.('تم تحديث مخزن الأنماط', `${fresh.length} نمط محدّث من بيانات حقيقية ومركّبة`, 'info');
+    } catch {
+      onNotify?.('تعذر تحديث مخزن الأنماط', 'تأكد من تشغيل الخادم الخلفي على المنفذ 8000', 'info');
+    } finally {
       setIsRefreshing(false);
-      onNotify?.('تم تحديث مخزن الأنماط', 'تمت مطابقة أحدث بيانات التفاعل', 'info');
-    }, 700);
+    }
   };
 
   return (
@@ -358,17 +408,17 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
           {/* Filter Pills + Refresh */}
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
-              {['الكل', 'فيديو', 'توقيت', 'محلي'].map((cat) => (
+              {CATEGORY_TABS.map((tab) => (
                 <button
-                  key={cat}
-                  onClick={() => setActiveCategory(cat)}
+                  key={tab.key}
+                  onClick={() => setActiveCategory(tab.key)}
                   className={`px-3 py-1 rounded-lg text-xs font-bold font-arabic transition-all cursor-pointer ${
-                    activeCategory === cat
+                    activeCategory === tab.key
                       ? 'bg-white text-slate-900 shadow-2xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  {cat}
+                  {tab.label}
                 </button>
               ))}
             </div>
@@ -384,51 +434,72 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
         </div>
 
         {/* Pattern Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {filteredPatterns.map((pattern) => (
-            <div
-              key={pattern.id}
-              className="flex flex-col justify-between p-4 bg-slate-50/70 hover:bg-white rounded-2xl border border-slate-200/80 hover:border-emerald-300 transition-all duration-200"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-2.5">
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${pattern.tagColor} font-arabic`}>
-                    {pattern.category}
-                  </span>
-                  <div className="p-1.5 rounded-lg bg-white border border-slate-200/70 shadow-2xs">
-                    {pattern.icon}
+        {isLoadingPatterns ? (
+          <p className="text-xs text-slate-400 font-arabic text-center py-8">جارٍ تحميل الأنماط من الخادم...</p>
+        ) : filteredPatterns.length === 0 ? (
+          <p className="text-xs text-slate-400 font-arabic text-center py-8">لا توجد أنماط في هذا التصنيف حالياً.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {filteredPatterns.map((pattern) => {
+              const meta = DIMENSION_META[pattern.dimension];
+              const isReal = pattern.source.startsWith('real_');
+              return (
+                <div
+                  key={pattern.pattern_id}
+                  className="flex flex-col justify-between p-4 bg-slate-50/70 hover:bg-white rounded-2xl border border-slate-200/80 hover:border-emerald-300 transition-all duration-200"
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-2.5">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${meta.tagColor} font-arabic`}>
+                        {meta.label}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {isReal && (
+                          <span
+                            title="مبني على بيانات حقيقية موثّقة"
+                            className="flex items-center gap-0.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full font-arabic"
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            حقيقي
+                          </span>
+                        )}
+                        <div className="p-1.5 rounded-lg bg-white border border-slate-200/70 shadow-2xs">
+                          {meta.icon}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-800 font-arabic leading-relaxed text-right font-medium">
+                      {pattern.pattern}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 pt-2.5 border-t border-slate-200/70 flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400 font-arabic">
+                      الثقة: <strong className="text-slate-700">{Math.round(pattern.confidence * 100)}%</strong>
+                    </span>
+
+                    <button
+                      onClick={() => handleCopy(pattern.pattern_id, pattern.pattern)}
+                      className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-emerald-700 transition-colors cursor-pointer font-arabic p-1 rounded-md hover:bg-emerald-50"
+                    >
+                      {copiedId === pattern.pattern_id ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-600">تم</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>نسخ</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
-                <p className="text-xs text-slate-800 font-arabic leading-relaxed text-right font-medium">
-                  {pattern.text}
-                </p>
-              </div>
-
-              <div className="mt-4 pt-2.5 border-t border-slate-200/70 flex items-center justify-between">
-                <span className="text-[10px] text-slate-400 font-arabic">
-                  دقة التنبؤ: <strong className="text-slate-700">{pattern.confidence}</strong>
-                </span>
-
-                <button
-                  onClick={() => handleCopy(pattern.id, pattern.text)}
-                  className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-emerald-700 transition-colors cursor-pointer font-arabic p-1 rounded-md hover:bg-emerald-50"
-                >
-                  {copiedId === pattern.id ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      <span className="text-emerald-600">تم</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>نسخ</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

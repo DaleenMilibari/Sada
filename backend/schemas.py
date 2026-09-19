@@ -25,9 +25,19 @@ class Pattern(BaseModel):
     affected_content_types: list[str]
     # Additive metadata (not in team.md's minimal shape) so Tasks 2/3 can
     # match a pattern programmatically instead of parsing the Arabic text.
-    dimension: Literal["content_type", "timing", "topic_platform"]
+    # "platform_reach_real" patterns come from real SBA Hajj 1445H season
+    # totals (see analyze_real_hajj_platforms), and "awj_sada_real" patterns
+    # come from the real AWJ | Sada podcast/X dataset (see
+    # analyze_real_awj_sada), rather than the synthetic per-post seed data.
+    # Both are descriptive-only - Tasks 2/3 never match against them since
+    # drafts/items don't carry the attributes these dimensions describe,
+    # they just ride along in the same store.
+    dimension: Literal[
+        "content_type", "timing", "topic_platform", "platform_reach_real", "awj_sada_real"
+    ]
     slice_key: str
     lift_pct: float
+    source: str = "synthetic_seed_engagement_records"
 
 
 class EngagementRecord(BaseModel):
@@ -54,6 +64,9 @@ class DraftContent(BaseModel):
     topic: str
     variants: list[str] | None = None
     platform_options: list[str] = Field(default_factory=list)
+    # Seed text for LLM variant generation when `variants` is omitted; read by
+    # content_optimizer_agent._generate_variants_via_llm via draft.get("original_text").
+    original_text: str | None = None
 
 
 class RankedAlternative(BaseModel):
@@ -131,6 +144,13 @@ class DiagnosisResult(BaseModel):
     low_confidence: bool = False
 
 
+# Diagnoses grounded in the real AWJ | Sada dataset (backend/data/raw/awj_sada_data.json)
+# rather than a PublishedItemMetrics item matched against the synthetic history -
+# see diagnostic_recommendation_agent.diagnose_awj_topic.
+class AwjDiagnosisRequest(BaseModel):
+    topic: Literal["podcast_reach", "x_relationship"]
+
+
 # ---------------------------------------------------------------------------
 # Task 4 — Live Clip Detection Agent
 # ---------------------------------------------------------------------------
@@ -157,3 +177,8 @@ class ClipOpportunityDetail(BaseModel):
 
 class ClipOpportunity(BaseModel):
     clip_opportunity: ClipOpportunityDetail
+
+
+class BroadcastSnapshot(BaseModel):
+    signal: list[BroadcastSignalPoint]
+    segments: list[BroadcastSegment]

@@ -1,0 +1,57 @@
+{
+  "source": {
+    "title_ar": "إحصائيات الاعلام لموسم حج 1445هـ",
+    "raw_file": "raw/hajj_1445_media_stats.xlsx",
+    "note": "Real SBA open data, season-level totals per platform for Hajj 1445H. Not per-post records - each platform reports a different subset of metrics, so comparisons must only use platforms that report the same metric (see analyze_real_hajj_platforms)."
+  },
+  "metrics": [
+    "engagement",
+    "impressions",
+    "likes",
+    "profile_views",
+    "views",
+    "watch_time"
+  ],
+  "platforms": {
+    "x": {
+      "label_ar": "منصة x",
+      "impressions": 48800000.0,
+      "views": 11000000.0,
+      "engagement": 364500.0,
+      "watch_time": null,
+      "profile_views": null,
+      "likes": null
+    },
+    "youtube": {
+      "label_ar": "يوتيوب",
+      "impressions": 341000000.0,
+      "views": 39100000.0,
+      "engagement": null,
+      "watch_time": 8700000.0,
+      "profile_views": null,
+      "likes": null
+    },
+    "meta": {
+      "label_ar": "منصة ميتا",
+      "impressions": 2300000.0,
+      "views": null,
+      "engagement": 166200.0,
+      "watch_time": null,
+      "profile_views": null,
+      "likes": null
+    },
+    "tiktok": {
+      "label_ar": "تيك توك",
+      "impressions": null,
+      "views": 14600000.0,
+      "engagement": 47300.0,
+      "watch_time": null,
+      "profile_views": 91100.0,
+      "likes": 369000.0
+    }
+  },
+  "total_reported": {
+    "impressions": 392100000.0,
+    "views": 64700000.0
+  }
+}

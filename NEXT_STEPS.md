@@ -12,7 +12,7 @@ Two independent processes, two terminals.
 
 ```bash
 pip install -r backend/requirements.txt
-cp backend/.env.example backend/.env      # fill in ANTHROPIC_API_KEY - needed for Task 2 & 3 tasks below
+cp backend/.env.example backend/.env      # fill in GEMINI_API_KEY - needed for Task 2 & 3 tasks below
 python -m backend.agents.behavior_analysis_agent   # populates backend/store/pattern_store.json once
 uvicorn backend.api:app --reload --port 8000
 ```
@@ -63,7 +63,7 @@ to `backend/api.py`, right after `app = FastAPI(...)`.
 
 **File:** [src/components/OptimizerView.tsx](src/components/OptimizerView.tsx)
 
-- Replace `handleOptimize`'s fake 3-step `setTimeout` chain with a real `POST /api/optimize` call, body = `DraftContent` (`content_type`, `topic`, `platform_options` from the selected platform buttons, `original_text` = the textarea content). Omit `variants` so the backend generates them via Claude — this requires `ANTHROPIC_API_KEY` to be set (see setup above); surface the `503` response as a toast if it's missing, don't fail silently.
+- Replace `handleOptimize`'s fake 3-step `setTimeout` chain with a real `POST /api/optimize` call, body = `DraftContent` (`content_type`, `topic`, `platform_options` from the selected platform buttons, `original_text` = the textarea content). Omit `variants` so the backend generates them via Gemini — this requires `GEMINI_API_KEY` to be set (see setup above); surface the `503` response as a toast if it's missing, don't fail silently.
 - Replace the hardcoded `OPTIMIZED_CONTENT` / `ORIGINAL_CONTENT` / `ALT_CONTENT` / `HASHTAGS` with the response's `recommended_variant` (winner card) and `ranked_alternatives` (the other cards).
 - The winner card's rationale line ("صيغة سؤال تفاعلي...") should come from `evidence[].pattern` in the response instead of being static text.
 - The timing capsule ("التوقيت المقترح للنشر") should show `recommended_time` from the response.
@@ -87,7 +87,7 @@ This one needs a small scope decision before coding: team.md's Task 3 is trigger
 Recommended approach:
 - Add a lightweight "select content to diagnose" affordance (e.g. a dropdown of a few mock published items, or reuse the existing `SUGGESTIONS` prompts as pre-wired triggers, each mapped to one hardcoded `PublishedItemMetrics` payload).
 - On selection, call `POST /api/diagnose` and render `diagnosis` as the agent's message text, `contributing_factors[]` as the bulleted cards (replacing the 3 hardcoded ones in `AGENT_RESPONSE`), and `recommendations[]` under them. Populate the message's `sources` from each factor's `evidence_source_title`.
-- Requires `ANTHROPIC_API_KEY`; handle the `503` the same way as Task B.
+- Requires `GEMINI_API_KEY`; handle the `503` the same way as Task B.
 - Leave genuinely free-text questions (e.g. "ما الكلمات الأكثر تداولاً؟") out of scope — they don't map to any of the 4 backend agents today.
 - **Done when:** selecting a mock published item produces a diagnosis in the chat that's grounded in that item's real numbers (verify by picking both an over- and under-performing mock item and confirming the explanations genuinely differ).
 
@@ -97,4 +97,4 @@ Recommended approach:
 
 - Don't invent new response fields — match `backend/schemas.py` exactly; if the UI needs something the backend doesn't return, that's a sign to extend the schema (flag it) rather than fake it client-side.
 - Keep the loading-state UX each view already has (spinners, step indicators) — just point it at real request latency instead of a fixed `setTimeout`.
-- If `ANTHROPIC_API_KEY` isn't set, Tasks B and D must show a clear error state, not a silent failure or fabricated content.
+- If `GEMINI_API_KEY` isn't set, Tasks B and D must show a clear error state, not a silent failure or fabricated content.

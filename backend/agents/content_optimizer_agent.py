@@ -27,7 +27,6 @@ BASELINE_SCORE = 100.0
 
 
 def _generate_variants_via_llm(content_type: str, topic: str, original_text: str | None) -> list[str]:
-    client = llm_client.get_client()
     seed = f'النص الأصلي: "{original_text}"' if original_text else "لا يوجد نص أصلي، اقترح من الصفر."
     prompt = (
         "أنت مساعد صياغة محتوى لمنصة إعلامية عربية اسمها صدى. "
@@ -36,12 +35,7 @@ def _generate_variants_via_llm(content_type: str, topic: str, original_text: str
         "أعد النتيجة فقط كمصفوفة JSON من 3 نصوص عربية قصيرة (بدون أي شرح إضافي)، مثال: "
         '["نص 1", "نص 2", "نص 3"]'
     )
-    response = client.messages.create(
-        model=llm_client.get_model(),
-        max_tokens=600,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw_text = "".join(block.text for block in response.content if block.type == "text")
+    raw_text = llm_client.generate_json(prompt)
     try:
         variants = json.loads(raw_text)
         if isinstance(variants, list) and all(isinstance(v, str) for v in variants):
@@ -128,11 +122,15 @@ def optimize(draft: dict[str, Any], patterns: list[dict[str, Any]]) -> dict[str,
     best = candidates[0]
     low_confidence = len(best["matched_patterns"]) == 0
 
-    if low_confidence and patterns:
+    # platform_reach_real patterns describe season-level platform share from
+    # the real Hajj data (see schemas.Pattern), not content/variant/timing
+    # behavior - never usable as fallback evidence for a draft recommendation.
+    fallback_candidates = [p for p in patterns if p["dimension"] != "platform_reach_real"]
+    if low_confidence and fallback_candidates:
         # Fallback: no pattern applies to this content type/topic/platform
         # combo at all - fall back to the single highest-confidence pattern
         # we have, explicitly flagged as lower-confidence, per team.md.
-        fallback_pattern = max(patterns, key=lambda p: p["confidence"])
+        fallback_pattern = max(fallback_candidates, key=lambda p: p["confidence"])
         best["matched_patterns"] = [fallback_pattern]
 
     def evidence_for(matched: list[dict[str, Any]], note: str | None) -> list[dict[str, Any]]:
