@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import DashboardView from './components/DashboardView';
 import OptimizerView from './components/OptimizerView';
 import BroadcastView from './components/BroadcastView';
+import LoginView from './components/LoginView';
 import Toast, { type ToastMessage } from './components/Toast';
-import type { ActiveView } from './types';
-import { Bell, Search, Radio, CheckCheck, X, AlertTriangle, Trophy, BarChart3 } from 'lucide-react';
+import type { ActiveView, NotificationItem } from './types';
+import { getToken, isAuthRequired, setToken, UNAUTHORIZED_EVENT } from './lib/api';
+import { Bell, Search, CheckCheck, X, AlertTriangle, Trophy, BarChart3, LogOut, Loader2 } from 'lucide-react';
 
 const VIEW_TITLES: Record<ActiveView, { title: string; subtitle: string }> = {
   dashboard: {
@@ -22,41 +24,23 @@ const VIEW_TITLES: Record<ActiveView, { title: string; subtitle: string }> = {
   },
 };
 
-const INITIAL_NOTIFICATIONS = [
-  {
-    id: 'n1',
-    title: 'تنبيه لقطة فيروسية مكتشفة',
-    desc: 'ارتفاع تفاعل بنسبة 45% عند الدقيقة 12:04 (حديث الدعم السكني)',
-    time: 'منذ 8 دقائق',
-    unread: true,
-    type: 'viral' as const,
-  },
-  {
-    id: 'n2',
-    title: 'توليد النسخة المحسّنة الفائزة',
-    desc: 'توقع زيادة التفاعل بنسبة +24% مع التوقيت الموصى به (8:00 م)',
-    time: 'منذ 24 دقيقة',
-    unread: true,
-    type: 'optimize' as const,
-  },
-  {
-    id: 'n3',
-    title: 'اكتمال دورة الأنماط الأسبوعية',
-    desc: 'تم تسجيل 3 أنماط جديدة في المخزن المشترك بنجاح',
-    time: 'منذ ساعة',
-    unread: false,
-    type: 'report' as const,
-  },
-];
+// Notification-center entries are recorded from real agent events (success toasts),
+// keyed to a view so the icon matches the agent that produced them.
+const VIEW_NOTIFICATION_TYPE: Record<ActiveView, NotificationItem['type']> = {
+  dashboard: 'report',
+  optimizer: 'optimize',
+  broadcast: 'viral',
+};
 
 interface TopBarProps {
   view: ActiveView;
   onSearchClick: () => void;
   unreadCount: number;
   onToggleNotifications: () => void;
+  onLogout?: () => void;
 }
 
-function TopBar({ view, onSearchClick, unreadCount, onToggleNotifications }: TopBarProps) {
+function TopBar({ view, onSearchClick, unreadCount, onToggleNotifications, onLogout }: TopBarProps) {
   const current = VIEW_TITLES[view];
 
   return (
@@ -113,26 +97,88 @@ function TopBar({ view, onSearchClick, unreadCount, onToggleNotifications }: Top
             )}
           </button>
         </div>
+
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            className="p-2.5 rounded-xl bg-slate-50 hover:bg-red-50 border border-slate-200/80 text-slate-600 hover:text-red-600 transition-colors cursor-pointer"
+            title="تسجيل الخروج"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </header>
   );
 }
 
+type AuthState = 'checking' | 'login' | 'ready';
+
 export default function App() {
+  const [authState, setAuthState] = useState<AuthState>(getToken() ? 'ready' : 'checking');
+  const [authRequired, setAuthRequired] = useState(true);
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+
+  useEffect(() => {
+    if (authState !== 'checking') return;
+    // No stored token: ask the backend whether a login is needed at all
+    // (auth is off in local dev when SADA_ACCESS_PASSWORD is unset).
+    isAuthRequired()
+      .then((required) => {
+        setAuthRequired(required);
+        setAuthState(required ? 'login' : 'ready');
+      })
+      .catch(() => setAuthState('login'));
+  }, [authState]);
+
+  useEffect(() => {
+    const onUnauthorized = () => setAuthState('login');
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
+
+  const handleLogout = () => {
+    setToken(null);
+    setNotifications([]);
+    setAuthState('login');
+  };
 
   const showToast = (title: string, description?: string, type: 'success' | 'info' | 'warning' = 'success') => {
     const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
     const newToast: ToastMessage = { id, title, description, type };
     setToasts((prev) => [...prev, newToast]);
 
+    if (type === 'success' && description) {
+      const notification: NotificationItem = {
+        id,
+        title,
+        desc: description,
+        time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+        unread: true,
+        type: VIEW_NOTIFICATION_TYPE[activeView],
+      };
+      setNotifications((prev) => [notification, ...prev].slice(0, 20));
+    }
+
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4000);
   };
+
+  if (authState === 'checking') {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader2 className="w-6 h-6 text-emerald-600 animate-spin" />
+      </div>
+    );
+  }
+
+  if (authState === 'login') {
+    return <LoginView onSuccess={() => setAuthState('ready')} />;
+  }
 
   const handleDismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -156,6 +202,7 @@ export default function App() {
         onSearchClick={() => {}}
         unreadCount={unreadCount}
         onToggleNotifications={() => setIsNotificationsOpen(!isNotificationsOpen)}
+        onLogout={authRequired ? handleLogout : undefined}
       />
 
       {/* ── Notifications Dropdown Popover ── */}
@@ -188,6 +235,9 @@ export default function App() {
           </div>
 
           <div className="space-y-2.5 max-h-72 overflow-y-auto">
+            {notifications.length === 0 && (
+              <p className="text-xs text-slate-400 font-arabic text-center py-6">لا توجد تنبيهات بعد</p>
+            )}
             {notifications.map((n) => (
               <div
                 key={n.id}

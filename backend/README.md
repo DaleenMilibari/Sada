@@ -1,14 +1,14 @@
-# Sada Backend - Agent Intelligence (team.md Tasks 1-4)
+# Sada Backend - Agent Intelligence (AGENT_SPEC.md Tasks 1-4)
 
-Implements the four agents specified in [team.md](../team.md). There was no
+Implements the four agents specified in [AGENT_SPEC.md](../AGENT_SPEC.md). There was no
 pre-existing backend or `backend-buildout-prompt.md` in this repo, so the
 data schemas, seed datasets and API contracts here were designed from
-scratch, following team.md's documented field names/JSON shapes exactly.
+scratch, following AGENT_SPEC.md's documented field names/JSON shapes exactly.
 
 ## Setup
 
 ```bash
-pip install -r backend/requirements.txt
+pip install -r backend/requirements-dev.txt   # runtime deps + pytest
 cp backend/.env.example backend/.env   # then fill in GEMINI_API_KEY
 ```
 
@@ -113,7 +113,7 @@ LLM-dependent endpoints return `503` with a clear message if
 pytest backend/tests -v
 ```
 
-Each test file asserts its task's acceptance criterion from team.md
+Each test file asserts its task's acceptance criterion from AGENT_SPEC.md
 directly (pattern count and re-run stability for Task 1, ranked
 variants with evidence for Task 2, distinct evidence-cited diagnoses for
 over/under-performers for Task 3, correct spike detection vs. noise for
@@ -128,10 +128,10 @@ scoring/retrieval/evidence logic around them directly.
   100 represents the dataset-wide baseline, and it compounds pattern lifts
   multiplicatively. It's meant for *ranking* candidates against each other,
   not as a literal forecast number to surface unstyled in a UI.
-- Pattern objects carry a few fields beyond team.md's minimal shape
+- Pattern objects carry a few fields beyond AGENT_SPEC.md's minimal shape
   (`dimension`, `slice_key`, `lift_pct`) so Tasks 2/3 can match a pattern to
   a draft/item programmatically instead of regexing the Arabic pattern text.
-  The fields team.md documents (`pattern`, `supporting_metric`,
+  The fields AGENT_SPEC.md documents (`pattern`, `supporting_metric`,
   `confidence`, `affected_content_types`) are unchanged.
 - Frontend rewiring (making `src/components/*View.tsx` call this API
   instead of their hardcoded mock data) is a follow-up, not part of this

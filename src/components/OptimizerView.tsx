@@ -1,13 +1,41 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Wand2, Clock, Trophy, CheckCircle2,
-  Upload, Loader2, Sparkles, Hash, ChevronDown, CalendarCheck,
-  Copy, Check, FileText, X
+  Loader2, Sparkles, ChevronDown, Copy, Check, AlertTriangle, Radio
 } from 'lucide-react';
+import { ApiError, apiFetch, describeError } from '../lib/api';
 
 interface OptimizerViewProps {
   onNotify?: (title: string, desc?: string, type?: 'success' | 'info') => void;
 }
+
+// Mirrors backend/schemas.py::OptimizationResult.
+interface RankedAlternative {
+  variant: string;
+  platform: string;
+  time_window: string;
+  predicted_engagement: number;
+  evidence: string[];
+}
+
+interface OptimizerEvidence {
+  pattern_id: string;
+  pattern: string;
+  note: string | null;
+}
+
+interface OptimizationResult {
+  recommended_variant: string;
+  predicted_engagement: number;
+  recommended_platform: string;
+  recommended_time: string;
+  ranked_alternatives: RankedAlternative[];
+  evidence: OptimizerEvidence[];
+  low_confidence: boolean;
+}
+
+// Scores are relative to the optimizer's BASELINE_SCORE (content_optimizer_agent.py).
+const BASELINE_SCORE = 100;
 
 const TEMPLATES = [
   {
@@ -24,82 +52,121 @@ const TEMPLATES = [
   },
 ];
 
-const OPTIMIZED_CONTENT = `في لحظةٍ استثنائية تجمع الوطن، البث المباشر ينقل لكم أصدق المشاهد وأدق التفاصيل لحظة بلحظة.
+// Values must match the platform / content_type / topic keys in backend/data/engagement_records.json.
+const PLATFORMS = [
+  { id: 'x', label: 'إكس' },
+  { id: 'instagram', label: 'إنستغرام' },
+  { id: 'youtube', label: 'يوتيوب' },
+  { id: 'snapchat', label: 'سناب شات' },
+] as const;
+type PlatformId = (typeof PLATFORMS)[number]['id'];
 
-كيف ترون أثر هذا التحول؟ شاركونا آراءكم وشاهدوا التغطية الكاملة الآن مباشرةً.`;
+const PLATFORM_LABELS: Record<string, string> = Object.fromEntries(PLATFORMS.map((p) => [p.id, p.label]));
 
-const ORIGINAL_CONTENT = 'بث مباشر للحدث اليوم. تابعونا للوقوف على أبرز المستجدات والتفاصيل على الهواء.';
+const CONTENT_TYPES = [
+  { id: 'video', label: 'فيديو' },
+  { id: 'image', label: 'صورة' },
+  { id: 'text', label: 'نص' },
+];
 
-const ALT_CONTENT = 'تغطية مستمرة ونقل فوري لأبرز المحطات اليوم. البث الرقمي المباشر متاح الآن لجميع الأجهزة بجودة فائقة.';
+const TOPICS = [
+  { id: 'national_event', label: 'حدث وطني' },
+  { id: 'housing_support', label: 'الدعم السكني' },
+  { id: 'economy', label: 'اقتصاد' },
+  { id: 'sports', label: 'رياضة' },
+  { id: 'science', label: 'علوم' },
+  { id: 'general', label: 'عام' },
+];
 
-const HASHTAGS = ['#بث_مباشر', '#حدث_وطني', '#السعودية_اليوم'];
+const TONES = ['تفاعلي', 'رسمي', 'إخباري'] as const;
 
-type Platform = 'إكس' | 'إنستغرام' | 'يوتيوب';
-const PLATFORMS: Platform[] = ['إكس', 'إنستغرام', 'يوتيوب'];
+const LOADING_STEPS = [
+  { step: 1, text: 'استخراج الأنماط المفتاحية' },
+  { step: 2, text: 'توليد المتغيرات عبر نموذج الذكاء الاصطناعي' },
+  { step: 3, text: 'حساب التفاعل المتوقع وتحديد التوقيت الأمثل' },
+];
+
+function formatLift(score: number): string {
+  const lift = Math.round(score - BASELINE_SCORE);
+  return `${lift >= 0 ? '+' : ''}${lift}%`;
+}
 
 export default function OptimizerView({ onNotify }: OptimizerViewProps) {
-  const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>(['إكس', 'إنستغرام']);
-  const [content, setContent] = useState(ORIGINAL_CONTENT);
-  const [tone, setTone] = useState<'تفاعلي' | 'رسمي' | 'إخباري'>('تفاعلي');
+  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformId[]>(['x', 'instagram']);
+  const [content, setContent] = useState(TEMPLATES[0].text);
+  const [tone, setTone] = useState<(typeof TONES)[number]>('تفاعلي');
+  const [contentType, setContentType] = useState('video');
+  const [topic, setTopic] = useState('national_event');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
-  const [hasResults, setHasResults] = useState(true);
-  const [isDragging, setIsDragging] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<{ name: string; size: string } | null>({
-    name: 'مقتطف_البث_01.mp4',
-    size: '14.2 MB',
-  });
+  const [result, setResult] = useState<OptimizationResult | null>(null);
+  const [submittedText, setSubmittedText] = useState('');
   const [copiedVariant, setCopiedVariant] = useState<string | null>(null);
-  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const stepTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const togglePlatform = (p: Platform) => {
+  useEffect(() => () => {
+    if (stepTimer.current) clearInterval(stepTimer.current);
+  }, []);
+
+  const togglePlatform = (p: PlatformId) => {
     setSelectedPlatforms((prev) =>
       prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]
     );
   };
 
   const handleOptimize = async () => {
+    if (isLoading || !content.trim() || selectedPlatforms.length === 0) return;
     setIsLoading(true);
     setLoadingStep(1);
-    await new Promise((r) => setTimeout(r, 600));
-    setLoadingStep(2);
-    await new Promise((r) => setTimeout(r, 700));
-    setLoadingStep(3);
-    await new Promise((r) => setTimeout(r, 500));
-    setIsLoading(false);
-    setHasResults(true);
-    onNotify?.('اكتمل توليد المتغيرات', 'تم تحديد النسخة الفائزة', 'success');
-  };
+    // Steps advance while the request is in flight; the last one completes when the response lands.
+    stepTimer.current = setInterval(() => setLoadingStep((s) => Math.min(s + 1, LOADING_STEPS.length)), 1500);
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) {
-      setUploadedFile({
-        name: file.name,
-        size: (file.size / (1024 * 1024)).toFixed(1) + ' MB',
+    try {
+      const res = await apiFetch<OptimizationResult>('/api/optimize', {
+        method: 'POST',
+        body: JSON.stringify({
+          content_type: contentType,
+          topic,
+          platform_options: selectedPlatforms,
+          original_text: content.trim(),
+          tone,
+        }),
       });
-      onNotify?.('تم إرفاق الملف', file.name, 'info');
+      setResult(res);
+      setSubmittedText(content.trim());
+      onNotify?.(
+        'اكتمل توليد المتغيرات',
+        `النسخة الفائزة على ${PLATFORM_LABELS[res.recommended_platform] ?? res.recommended_platform} (${formatLift(res.predicted_engagement)} تفاعل متوقع)`,
+        'success'
+      );
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 401)) {
+        const { title, desc } = describeError(err);
+        onNotify?.(title, desc, 'info');
+      }
+    } finally {
+      if (stepTimer.current) clearInterval(stepTimer.current);
+      setIsLoading(false);
+      setLoadingStep(0);
     }
   };
 
   const handleCopy = (key: string, text: string) => {
     navigator.clipboard?.writeText(text);
     setCopiedVariant(key);
-    onNotify?.('تم نسخ النص إلى الحافظة', '', 'success');
+    onNotify?.('تم نسخ النص إلى الحافظة', '', 'info');
     setTimeout(() => setCopiedVariant(null), 2000);
   };
 
-  const confirmPublish = () => {
-    setIsScheduleModalOpen(false);
-    onNotify?.(
-      'تم اعتماد وجدولة النشر الفوري',
-      'الموعد المحدد: 8:00 مساءً',
-      'success'
-    );
-  };
+  // ranked_alternatives covers every variant × platform × time combo - show each
+  // distinct variant other than the winner once, at its best-scoring combo.
+  const alternatives = result
+    ? result.ranked_alternatives.filter(
+        (alt, i, all) =>
+          alt.variant !== result.recommended_variant &&
+          all.findIndex((a) => a.variant === alt.variant) === i
+      )
+    : [];
 
   return (
     <div className="animate-fade-in">
@@ -132,13 +199,13 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
             <label className="block text-xs font-bold text-slate-500 font-arabic mb-2.5">
               المنصات المستهدفة
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {PLATFORMS.map((p) => {
-                const isSelected = selectedPlatforms.includes(p);
+                const isSelected = selectedPlatforms.includes(p.id);
                 return (
                   <button
-                    key={p}
-                    onClick={() => togglePlatform(p)}
+                    key={p.id}
+                    onClick={() => togglePlatform(p.id)}
                     className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer font-arabic flex items-center justify-center gap-1.5 ${
                       isSelected
                         ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
@@ -146,7 +213,7 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
                     }`}
                   >
                     {isSelected && <Check className="w-3.5 h-3.5" />}
-                    <span>{p}</span>
+                    <span>{p.label}</span>
                   </button>
                 );
               })}
@@ -160,7 +227,7 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
                 نبرة الصياغة
               </label>
               <div className="grid grid-cols-3 gap-2">
-                {(['تفاعلي', 'رسمي', 'إخباري'] as const).map((t) => (
+                {TONES.map((t) => (
                   <button
                     key={t}
                     onClick={() => setTone(t)}
@@ -176,18 +243,43 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-500 font-arabic mb-2">
-                نوع المحتوى
-              </label>
-              <div className="relative">
-                <select className="w-full text-right text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-arabic appearance-none outline-none focus:border-emerald-500 cursor-pointer">
-                  <option>محتوى بث مباشر</option>
-                  <option>لقطة فيروسية</option>
-                  <option>تغطية حدث وطني</option>
-                  <option>حوار استوديو</option>
-                </select>
-                <ChevronDown className="absolute left-3 top-3 w-4 h-4 text-slate-400 pointer-events-none" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="content-type" className="block text-xs font-bold text-slate-500 font-arabic mb-2">
+                  نوع المحتوى
+                </label>
+                <div className="relative">
+                  <select
+                    id="content-type"
+                    value={contentType}
+                    onChange={(e) => setContentType(e.target.value)}
+                    className="w-full text-right text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-arabic appearance-none outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    {CONTENT_TYPES.map((c) => (
+                      <option key={c.id} value={c.id}>{c.label}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute left-3 top-3 w-4 h-4 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="topic" className="block text-xs font-bold text-slate-500 font-arabic mb-2">
+                  الموضوع
+                </label>
+                <div className="relative">
+                  <select
+                    id="topic"
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value)}
+                    className="w-full text-right text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 font-arabic appearance-none outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    {TOPICS.map((t) => (
+                      <option key={t.id} value={t.id}>{t.label}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute left-3 top-3 w-4 h-4 text-slate-400 pointer-events-none" />
+                </div>
               </div>
             </div>
           </div>
@@ -195,90 +287,28 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
           {/* Raw Content Text Area */}
           <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs">
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-bold text-slate-500 font-arabic">
+              <label htmlFor="draft" className="text-xs font-bold text-slate-500 font-arabic">
                 الوصف الأولي للمحتوى
               </label>
-              <span className="text-[11px] text-slate-400">
+              <span className={`text-[11px] ${content.length > 280 ? 'text-amber-600 font-bold' : 'text-slate-400'}`}>
                 {content.length} / 280
               </span>
             </div>
             <textarea
+              id="draft"
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="اكتب فكرة المنشور الأولية..."
               rows={4}
+              maxLength={2000}
               className="w-full text-right text-sm text-slate-800 placeholder:text-slate-300 bg-slate-50 border border-slate-200 rounded-xl p-3 font-arabic outline-none resize-none focus:border-emerald-500 transition-all leading-relaxed"
             />
-          </div>
-
-          {/* File Upload Zone */}
-          <div
-            className={`bg-white border-2 border-dashed rounded-2xl p-4 text-center cursor-pointer transition-all duration-200 ${
-              isDragging
-                ? 'border-emerald-500 bg-emerald-50/50'
-                : 'border-slate-200 hover:border-emerald-300'
-            }`}
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              accept="image/*,video/*"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) {
-                  setUploadedFile({
-                    name: f.name,
-                    size: (f.size / (1024 * 1024)).toFixed(1) + ' MB',
-                  });
-                  onNotify?.('تم إرفاق الملف', f.name, 'info');
-                }
-              }}
-            />
-
-            {uploadedFile ? (
-              <div className="flex items-center justify-between p-2 bg-emerald-50 border border-emerald-200 rounded-xl">
-                <div className="flex items-center gap-2 text-right">
-                  <FileText className="w-4 h-4 text-emerald-700" />
-                  <div>
-                    <p className="text-xs font-bold text-slate-800 font-arabic truncate max-w-[140px]">
-                      {uploadedFile.name}
-                    </p>
-                    <p className="text-[10px] text-slate-400">{uploadedFile.size}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setUploadedFile(null);
-                  }}
-                  className="p-1 text-slate-400 hover:text-red-500"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="py-2">
-                <Upload className="w-5 h-5 text-slate-400 mx-auto mb-1" />
-                <p className="text-xs font-bold text-slate-600 font-arabic">
-                  اسحب الفيديو أو الصورة هنا
-                </p>
-                <p className="text-[10px] text-slate-400 font-arabic">
-                  MP4, MOV, PNG حتى 50 ميغابايت
-                </p>
-              </div>
-            )}
           </div>
 
           {/* CTA Button */}
           <button
             onClick={handleOptimize}
-            disabled={isLoading || !content.trim()}
+            disabled={isLoading || !content.trim() || selectedPlatforms.length === 0}
             className="w-full flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white font-bold text-base py-3.5 rounded-2xl shadow-sm transition-all active:scale-[0.99] cursor-pointer disabled:cursor-not-allowed font-arabic"
           >
             {isLoading ? (
@@ -293,6 +323,9 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
               </>
             )}
           </button>
+          {selectedPlatforms.length === 0 && (
+            <p className="text-[11px] text-amber-600 font-arabic text-center">اختر منصة واحدة على الأقل</p>
+          )}
         </div>
 
         {/* ── Results Panel (Left, 3 cols) ── */}
@@ -315,11 +348,7 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
               </p>
 
               <div className="w-full max-w-sm space-y-2 text-right">
-                {[
-                  { step: 1, text: 'استخراج الأنماط المفتاحية' },
-                  { step: 2, text: 'صياغة النسخ وحساب نسبة التفاعل' },
-                  { step: 3, text: 'توليد الوسوم وتحديد التوقيت الأمثل' },
-                ].map((item) => (
+                {LOADING_STEPS.map((item) => (
                   <div
                     key={item.step}
                     className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-arabic ${
@@ -342,7 +371,17 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
             </div>
           )}
 
-          {!isLoading && hasResults && (
+          {!isLoading && !result && (
+            <div className="min-h-[440px] flex flex-col items-center justify-center bg-white border border-dashed border-slate-200 rounded-2xl p-8 text-center">
+              <Wand2 className="w-8 h-8 text-slate-300 mb-3" />
+              <h3 className="text-sm font-bold text-slate-700 font-arabic mb-1">لا توجد نتائج بعد</h3>
+              <p className="text-xs text-slate-400 font-arabic max-w-xs">
+                اكتب وصف المنشور واختر المنصات، ثم اضغط «تحسين واختبار المتغيرات» لتوليد النسخ ومقارنتها.
+              </p>
+            </div>
+          )}
+
+          {!isLoading && result && (
             <div className="space-y-4 animate-slide-up">
               {/* Timing Capsule Widget */}
               <div className="bg-blue-50/60 border border-blue-200/70 rounded-2xl p-4 shadow-xs flex items-center justify-between">
@@ -352,29 +391,39 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 font-arabic">
-                      التوقيت المقترح للنشر
+                      التوقيت والمنصة المقترحان للنشر
                     </p>
                     <p className="text-sm font-black text-slate-900 font-arabic mt-0.5">
-                      اليوم الساعة <span className="text-emerald-700">8:00 مساءً</span>
+                      <span className="text-emerald-700">{result.recommended_time}</span>
                     </p>
                   </div>
                 </div>
 
-                <span className="text-xs font-semibold text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full font-arabic">
-                  ذروة التفاعل
+                <span className="flex items-center gap-1 text-xs font-semibold text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full font-arabic">
+                  <Radio className="w-3 h-3" />
+                  {PLATFORM_LABELS[result.recommended_platform] ?? result.recommended_platform}
                 </span>
               </div>
 
-              {/* 1. Winner Variant Card (Cleaned of duplicates) */}
+              {result.low_confidence && (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-800 font-arabic">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>
+                    ثقة منخفضة: لا يوجد نمط تفاعل مطابق مباشرةً لهذا النوع والموضوع، والتوصية مبنية على أقوى نمط عام متاح.
+                  </span>
+                </div>
+              )}
+
+              {/* 1. Winner Variant Card */}
               <div className="bg-white border-2 border-emerald-600 rounded-2xl p-5 shadow-xs relative overflow-hidden">
                 <div className="flex items-center justify-between mb-3">
                   <span className="flex items-center gap-1.5 bg-emerald-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow-2xs font-arabic">
                     <Trophy className="w-3.5 h-3.5" />
-                    النسخة الفائزة (+24% تفاعل متوقع)
+                    النسخة الفائزة ({formatLift(result.predicted_engagement)} تفاعل متوقع)
                   </span>
 
                   <button
-                    onClick={() => handleCopy('winner', OPTIMIZED_CONTENT)}
+                    onClick={() => handleCopy('winner', result.recommended_variant)}
                     className="flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer font-arabic"
                   >
                     {copiedVariant === 'winner' ? (
@@ -391,30 +440,20 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
                   </button>
                 </div>
 
-                {/* Content Box */}
                 <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-4 mb-3">
                   <p className="text-sm text-slate-800 font-arabic leading-relaxed whitespace-pre-line text-right font-medium">
-                    {OPTIMIZED_CONTENT}
+                    {result.recommended_variant}
                   </p>
                 </div>
 
-                {/* Hashtags */}
-                <div className="flex flex-wrap items-center gap-1.5 justify-end mb-3">
-                  {HASHTAGS.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-white border border-emerald-200/80 px-2.5 py-1 rounded-full font-arabic"
-                    >
-                      <Hash className="w-3 h-3 text-emerald-600" />
-                      {tag}
-                    </span>
+                {/* Rationale - evidence from the pattern store */}
+                <div className="pt-2.5 border-t border-emerald-100 space-y-1.5">
+                  {result.evidence.map((ev) => (
+                    <div key={ev.pattern_id + ev.pattern} className="flex items-start gap-1.5 text-xs text-slate-500 font-arabic">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                      <span>{ev.pattern}</span>
+                    </div>
                   ))}
-                </div>
-
-                {/* Rationale */}
-                <div className="pt-2.5 border-t border-emerald-100 flex items-center gap-1.5 text-xs text-slate-500 font-arabic">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-                  <span>صيغة سؤال تفاعلي + نبرة احتفالية تتطابق مع نمط البث</span>
                 </div>
               </div>
 
@@ -425,7 +464,7 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
                     النسخة الأصلية
                   </span>
                   <button
-                    onClick={() => handleCopy('original', ORIGINAL_CONTENT)}
+                    onClick={() => handleCopy('original', submittedText)}
                     className="p-1 text-slate-400 hover:text-slate-700 transition-colors"
                     title="نسخ"
                   >
@@ -433,98 +472,42 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
                   </button>
                 </div>
                 <p className="text-xs text-slate-600 font-arabic leading-relaxed bg-slate-50/70 p-3 rounded-xl border border-slate-100 text-right">
-                  {ORIGINAL_CONTENT}
+                  {submittedText}
                 </p>
               </div>
 
-              {/* 3. Alternative Version */}
-              <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-xs">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-700 font-arabic">
-                      النسخة البديلة
-                    </span>
-                    <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-arabic">
-                      +9% تفاعل متوقع
-                    </span>
+              {/* 3. Alternative Versions */}
+              {alternatives.map((alt, i) => (
+                <div key={alt.variant} className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-slate-700 font-arabic">
+                        نسخة بديلة {i + 1}
+                      </span>
+                      <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-arabic">
+                        {formatLift(alt.predicted_engagement)} تفاعل متوقع
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-arabic">
+                        {PLATFORM_LABELS[alt.platform] ?? alt.platform} · {alt.time_window}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleCopy(`alt-${i}`, alt.variant)}
+                      className="p-1 text-slate-400 hover:text-slate-700 transition-colors"
+                      title="نسخ"
+                    >
+                      {copiedVariant === `alt-${i}` ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleCopy('alt', ALT_CONTENT)}
-                    className="p-1 text-slate-400 hover:text-slate-700 transition-colors"
-                    title="نسخ"
-                  >
-                    {copiedVariant === 'alt' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
+                  <p className="text-xs text-slate-600 font-arabic leading-relaxed bg-slate-50/70 p-3 rounded-xl border border-slate-100 text-right">
+                    {alt.variant}
+                  </p>
                 </div>
-                <p className="text-xs text-slate-600 font-arabic leading-relaxed bg-slate-50/70 p-3 rounded-xl border border-slate-100 text-right">
-                  {ALT_CONTENT}
-                </p>
-              </div>
-
-              {/* Action Footer CTA */}
-              <button
-                onClick={() => setIsScheduleModalOpen(true)}
-                className="w-full flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-base py-3.5 rounded-2xl shadow-sm transition-all active:scale-[0.99] cursor-pointer font-arabic"
-              >
-                <CalendarCheck className="w-5 h-5" />
-                <span>اعتماد وجدولة النشر الفوري</span>
-              </button>
+              ))}
             </div>
           )}
         </div>
       </div>
-
-      {/* ── Schedule Confirmation Modal ── */}
-      {isScheduleModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4" dir="rtl">
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-md w-full shadow-xl animate-slide-up text-right">
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2 text-emerald-700">
-                <CalendarCheck className="w-5 h-5" />
-                <h3 className="text-base font-bold font-arabic">تأكيد الجدولة</h3>
-              </div>
-              <button
-                onClick={() => setIsScheduleModalOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2 mb-5">
-              <div className="flex items-center justify-between text-xs font-arabic">
-                <span className="text-slate-400">النسخة:</span>
-                <span className="font-bold text-emerald-700">النسخة المحسّنة (الفائزة)</span>
-              </div>
-              <div className="flex items-center justify-between text-xs font-arabic">
-                <span className="text-slate-400">القنوات:</span>
-                <span className="font-bold text-slate-800">
-                  {selectedPlatforms.join(' · ')}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs font-arabic">
-                <span className="text-slate-400">الموعد:</span>
-                <span className="font-bold text-slate-800">اليوم الساعة 8:00 مساءً</span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={confirmPublish}
-                className="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl font-arabic cursor-pointer"
-              >
-                تأكيد
-              </button>
-              <button
-                onClick={() => setIsScheduleModalOpen(false)}
-                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl font-arabic cursor-pointer"
-              >
-                إلغاء
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

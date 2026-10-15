@@ -6,12 +6,11 @@ import {
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
+import { ApiError, apiFetch, describeError } from '../lib/api';
 
 interface DashboardViewProps {
   onNotify?: (title: string, desc?: string, type?: 'success' | 'info') => void;
 }
-
-const API_BASE = 'http://localhost:8000';
 
 // Mirrors backend/schemas.py::Pattern.
 interface ApiPattern {
@@ -91,11 +90,10 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/patterns`);
-        if (!res.ok) throw new Error('patterns fetch failed');
-        setPatterns(await res.json());
-      } catch {
-        onNotify?.('تعذر تحميل مخزن الأنماط', 'تأكد من تشغيل الخادم الخلفي على المنفذ 8000', 'info');
+        setPatterns(await apiFetch<ApiPattern[]>('/api/patterns'));
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) return; // App switches to the login screen
+        onNotify?.('تعذر تحميل مخزن الأنماط', describeError(err).desc, 'info');
       } finally {
         setIsLoadingPatterns(false);
       }
@@ -119,13 +117,11 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      const res = await fetch(`${API_BASE}/api/patterns/refresh`, { method: 'POST' });
-      if (!res.ok) throw new Error('refresh failed');
-      const fresh: ApiPattern[] = await res.json();
+      const fresh = await apiFetch<ApiPattern[]>('/api/patterns/refresh', { method: 'POST' });
       setPatterns(fresh);
       onNotify?.('تم تحديث مخزن الأنماط', `${fresh.length} نمط محدّث من بيانات حقيقية ومركّبة`, 'info');
-    } catch {
-      onNotify?.('تعذر تحديث مخزن الأنماط', 'تأكد من تشغيل الخادم الخلفي على المنفذ 8000', 'info');
+    } catch (err) {
+      onNotify?.('تعذر تحديث مخزن الأنماط', describeError(err).desc, 'info');
     } finally {
       setIsRefreshing(false);
     }

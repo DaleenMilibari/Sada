@@ -1,4 +1,6 @@
-# Sada — Agent Development Tasks (Team.md)
+# Sada — Agent Specification (AGENT_SPEC.md)
+
+> Original MVP spec for the four agents. Field names and JSON shapes here are the contract the backend implements. Current team work lives in [team.md](team.md).
 
 This file splits the remaining **agent intelligence** work into 4 independent tasks. Each task can be built by one person in their own file, against the stub contracts already wired into the backend (see `backend-buildout-prompt.md`). No task requires another task's code to exist first — each agent reads from the shared seed/mock data and returns its own structured JSON.
 

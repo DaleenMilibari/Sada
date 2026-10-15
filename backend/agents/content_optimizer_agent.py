@@ -1,7 +1,7 @@
 """Task 2 - Content & Publishing Optimizer Agent.
 
 Evaluates a draft piece of content against Task 1's pattern store and
-recommends the best variant, platform and publish time. See team.md for
+recommends the best variant, platform and publish time. See AGENT_SPEC.md for
 the full spec.
 """
 
@@ -26,8 +26,12 @@ HASHTAG_BONUS = 3.0
 BASELINE_SCORE = 100.0
 
 
-def _generate_variants_via_llm(content_type: str, topic: str, original_text: str | None) -> list[str]:
+def _generate_variants_via_llm(
+    content_type: str, topic: str, original_text: str | None, tone: str | None = None
+) -> list[str]:
     seed = f'النص الأصلي: "{original_text}"' if original_text else "لا يوجد نص أصلي، اقترح من الصفر."
+    if tone:
+        seed = f"استخدم نبرة {tone}. {seed}"
     prompt = (
         "أنت مساعد صياغة محتوى لمنصة إعلامية عربية اسمها صدى. "
         f"اكتب 3 نسخ بديلة (متغيرات) لمنشور من نوع '{content_type}' حول موضوع '{topic}'. "
@@ -95,7 +99,7 @@ def optimize(draft: dict[str, Any], patterns: list[dict[str, Any]]) -> dict[str,
     platform_options = draft.get("platform_options") or PLATFORMS
 
     variants = draft.get("variants") or _generate_variants_via_llm(
-        content_type, topic, draft.get("original_text")
+        content_type, topic, draft.get("original_text"), draft.get("tone")
     )
     if not variants:
         raise ValueError("No variants supplied and none could be generated.")
@@ -129,7 +133,7 @@ def optimize(draft: dict[str, Any], patterns: list[dict[str, Any]]) -> dict[str,
     if low_confidence and fallback_candidates:
         # Fallback: no pattern applies to this content type/topic/platform
         # combo at all - fall back to the single highest-confidence pattern
-        # we have, explicitly flagged as lower-confidence, per team.md.
+        # we have, explicitly flagged as lower-confidence, per AGENT_SPEC.md.
         fallback_pattern = max(fallback_candidates, key=lambda p: p["confidence"])
         best["matched_patterns"] = [fallback_pattern]
 

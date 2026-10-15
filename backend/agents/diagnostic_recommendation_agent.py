@@ -2,9 +2,9 @@
 
 Explains why a published piece of content over/under-performed, grounded
 in retrieved comparable history and Task 1's pattern store, and produces
-actionable recommendations. See team.md for the full spec.
+actionable recommendations. See AGENT_SPEC.md for the full spec.
 
-Retrieval is a deterministic metadata filter (team.md explicitly allows
+Retrieval is a deterministic metadata filter (AGENT_SPEC.md explicitly allows
 this instead of a vector DB for MVP): every contributing factor is built
 from real retrieved records or real patterns *before* the LLM is called.
 The LLM's only job is to turn that grounded material into a readable

@@ -26,7 +26,8 @@ Designed using an upscale **Enterprise Light Mode** interface to reflect an offi
 
 * **Frontend Framework:** React.js (TypeScript) + Vite
 * **Styling & Assets:** Tailwind CSS + Lucide React Icons
-* **Hosting & Deployment:** Vercel
+* **Backend:** FastAPI (Python) multi-agent API + Google Gemini
+* **Hosting & Deployment:** Vercel (frontend) + Render (backend) — see [DEPLOYMENT.md](DEPLOYMENT.md)
 
 ---
 

@@ -5,6 +5,7 @@ import {
   Activity, Scissors, Wifi, Zap, Copy, Check,
   ThumbsUp, TrendingDown, Radio
 } from 'lucide-react';
+import { ApiError, apiFetch, describeError } from '../lib/api';
 
 interface BroadcastViewProps {
   onNotify?: (title: string, desc?: string, type?: 'success' | 'info') => void;
@@ -67,8 +68,6 @@ interface TimelineBar {
   level: number;
   isSpike: boolean;
 }
-
-const API_BASE = 'http://localhost:8000';
 
 function formatTime(totalSeconds: number): string {
   const m = Math.floor(totalSeconds / 60);
@@ -189,20 +188,16 @@ export default function BroadcastView({ onNotify }: BroadcastViewProps) {
   useEffect(() => {
     (async () => {
       try {
-        const [signalRes, clipsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/broadcast/signal`),
-          fetch(`${API_BASE}/api/broadcast/detect-clips`, { method: 'POST' }),
+        const [signalData, clipsData] = await Promise.all([
+          apiFetch<{ signal: BroadcastSignalPoint[]; segments: BroadcastSegment[] }>('/api/broadcast/signal'),
+          apiFetch<ClipOpportunity[]>('/api/broadcast/detect-clips', { method: 'POST' }),
         ]);
-        if (!signalRes.ok || !clipsRes.ok) throw new Error('broadcast fetch failed');
-
-        const signalData: { signal: BroadcastSignalPoint[]; segments: BroadcastSegment[] } =
-          await signalRes.json();
-        const clipsData: ClipOpportunity[] = await clipsRes.json();
 
         setSignal(signalData.signal);
         setClips(clipsData.map((c) => c.clip_opportunity));
-      } catch {
-        onNotify?.('تعذر تحميل بيانات البث', 'تأكد من تشغيل الخادم الخلفي على المنفذ 8000', 'info');
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) return; // App switches to the login screen
+        onNotify?.('تعذر تحميل بيانات البث', describeError(err).desc, 'info');
       } finally {
         setBroadcastLoading(false);
       }
@@ -226,31 +221,10 @@ export default function BroadcastView({ onNotify }: BroadcastViewProps) {
     setIsTyping(true);
 
     try {
-      const res = await fetch(`${API_BASE}/api/diagnose/awj-sada`, {
+      const result = await apiFetch<DiagnosisResult>('/api/diagnose/awj-sada', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic: entry.topic }),
       });
-
-      if (res.status === 503) {
-        onNotify?.('مفتاح Gemini API غير مهيأ', 'أضف GEMINI_API_KEY إلى backend/.env لتفعيل التشخيص', 'info');
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now().toString() + '-agent-error',
-            role: 'agent',
-            content: 'تعذر إجراء التشخيص: مفتاح Gemini API غير مهيأ على الخادم.',
-            timestamp: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
-          },
-        ]);
-        return;
-      }
-
-      if (!res.ok) {
-        throw new Error(`Request failed: ${res.status}`);
-      }
-
-      const result: DiagnosisResult = await res.json();
       const sources = Array.from(new Set(result.contributing_factors.map((f) => f.evidence_source_title)));
 
       setMessages((prev) => [
@@ -263,14 +237,16 @@ export default function BroadcastView({ onNotify }: BroadcastViewProps) {
           sources,
         },
       ]);
-    } catch {
-      onNotify?.('تعذر الاتصال بخادم التشخيص', 'تأكد من تشغيل الخادم الخلفي على المنفذ 8000', 'info');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) return; // App switches to the login screen
+      const { title, desc } = describeError(err);
+      onNotify?.(title, desc, 'info');
       setMessages((prev) => [
         ...prev,
         {
           id: Date.now().toString() + '-agent-error',
           role: 'agent',
-          content: 'تعذر الاتصال بخادم التشخيص. تأكد من تشغيل الخادم الخلفي.',
+          content: `تعذر إجراء التشخيص: ${title}.`,
           timestamp: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -282,8 +258,10 @@ export default function BroadcastView({ onNotify }: BroadcastViewProps) {
   const handleApproveClip = () => {
     setClipApproved(true);
     onNotify?.(
-      'تم اعتماد ونشر المقطع',
-      'تم بث اللقطة (20 ثانية) والتغريدة المترجمة تلقائياً',
+      'تم اعتماد المقطع',
+      topClip
+        ? `${topClip.segment_label} · ${formatTime(topClip.start_time)} - ${formatTime(topClip.end_time)}`
+        : 'تم اعتماد اللقطة المقترحة',
       'success'
     );
   };

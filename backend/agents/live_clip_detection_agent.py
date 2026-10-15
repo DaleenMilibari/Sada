@@ -1,7 +1,7 @@
 """Task 4 - Live Clip Detection Agent.
 
 Flags real-time engagement spikes during a live broadcast that correspond
-to specific broadcast segments, as social-clip opportunities. See team.md
+to specific broadcast segments, as social-clip opportunities. See AGENT_SPEC.md
 for the full spec.
 """
 

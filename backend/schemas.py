@@ -1,6 +1,6 @@
-"""Pydantic models for the JSON shapes documented in team.md.
+"""Pydantic models for the JSON shapes documented in AGENT_SPEC.md.
 
-Field names here are load-bearing: the "Shared rules" section of team.md
+Field names here are load-bearing: the "Shared rules" section of AGENT_SPEC.md
 requires every agent to use the exact field names it documents so the four
 tasks stay independent of each other's in-progress code. Do not rename.
 """
@@ -23,7 +23,7 @@ class Pattern(BaseModel):
     supporting_metric: str
     confidence: float
     affected_content_types: list[str]
-    # Additive metadata (not in team.md's minimal shape) so Tasks 2/3 can
+    # Additive metadata (not in AGENT_SPEC.md's minimal shape) so Tasks 2/3 can
     # match a pattern programmatically instead of parsing the Arabic text.
     # "platform_reach_real" patterns come from real SBA Hajj 1445H season
     # totals (see analyze_real_hajj_platforms), and "awj_sada_real" patterns
@@ -66,7 +66,10 @@ class DraftContent(BaseModel):
     platform_options: list[str] = Field(default_factory=list)
     # Seed text for LLM variant generation when `variants` is omitted; read by
     # content_optimizer_agent._generate_variants_via_llm via draft.get("original_text").
-    original_text: str | None = None
+    original_text: str | None = Field(default=None, max_length=2000)
+    # Optional writing tone (e.g. "تفاعلي" / "رسمي" / "إخباري") passed to the
+    # LLM variant-generation prompt; ignored when `variants` is supplied.
+    tone: str | None = Field(default=None, max_length=40)
 
 
 class RankedAlternative(BaseModel):

@@ -2,7 +2,7 @@
 
 Detects engagement patterns across content type, topic, timing and platform
 from the seeded engagement dataset, and maintains a persistent pattern store
-that Tasks 2 and 3 read from. See team.md for the full spec.
+that Tasks 2 and 3 read from. See AGENT_SPEC.md for the full spec.
 """
 
 from __future__ import annotations
@@ -409,7 +409,7 @@ def upsert_store(new_patterns: list[dict[str, Any]], store_path: Path = STORE_PA
     """Merge new_patterns into the persisted store, keyed by pattern_id.
 
     Re-running the agent on refreshed data updates existing patterns in
-    place instead of duplicating them, per team.md's acceptance criteria.
+    place instead of duplicating them, per AGENT_SPEC.md's acceptance criteria.
     """
     existing = {p["pattern_id"]: p for p in load_store(store_path)}
     for p in new_patterns:

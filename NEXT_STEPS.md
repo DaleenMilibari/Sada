@@ -1,6 +1,6 @@
 # Sada — Next Steps (Frontend Integration)
 
-[team.md](team.md)'s four agents are built and tested in [backend/](backend/) (see [backend/README.md](backend/README.md)), but the React frontend still renders 100% hardcoded mock data — none of the three views call the backend yet. This file splits that integration work into 4 independent tasks, one per agent/view pairing. As with team.md, each task can be built by one person without waiting on the others.
+[AGENT_SPEC.md](AGENT_SPEC.md)'s four agents are built and tested in [backend/](backend/) (see [backend/README.md](backend/README.md)), but the React frontend still renders 100% hardcoded mock data — none of the three views call the backend yet. This file splits that integration work into 4 independent tasks, one per agent/view pairing. As with AGENT_SPEC.md, each task can be built by one person without waiting on the others.
 
 ---
 
@@ -56,7 +56,7 @@ to `backend/api.py`, right after `app = FastAPI(...)`.
 - Replace the hardcoded `patternsList` array with a `fetch("http://localhost:8000/api/patterns")` on mount, typed against `Pattern` in `backend/schemas.py` (`pattern_id`, `pattern`, `supporting_metric`, `confidence`, `affected_content_types`, `dimension`, `slice_key`, `lift_pct`).
 - Wire the existing "تحديث" (refresh) button to `POST /api/patterns/refresh` instead of the fake `setTimeout`.
 - The category filter pills (`فيديو`/`توقيت`/`محلي`) currently filter on a made-up `category` field — remap them to filter on the real `dimension` value (`content_type` / `timing` / `topic_platform`) instead.
-- The top metric cards and the platform-breakdown chart (`weeklyData`, `platforms`) aren't produced by any of the 4 agents — leave them mocked for now; wiring them is a separate future analytics task, not part of team.md's scope.
+- The top metric cards and the platform-breakdown chart (`weeklyData`, `platforms`) aren't produced by any of the 4 agents — leave them mocked for now; wiring them is a separate future analytics task, not part of AGENT_SPEC.md's scope.
 - **Done when:** the pattern cards on load match whatever `GET /api/patterns` currently returns (5 patterns against the seed data), and clicking refresh visibly re-fetches.
 
 ## Task B — Wire Optimizer to the Content Optimizer Agent (Task 2)
@@ -82,7 +82,7 @@ to `backend/api.py`, right after `app = FastAPI(...)`.
 
 **File:** [src/components/BroadcastView.tsx](src/components/BroadcastView.tsx) (chat section)
 
-This one needs a small scope decision before coding: team.md's Task 3 is triggered by *selecting a specific published item*, not by open-ended free-text chat. The current UI is a free-text chat box, which doesn't map 1:1 onto `POST /api/diagnose`'s input (`PublishedItemMetrics` — a specific `content_id`, platform, metrics, etc.).
+This one needs a small scope decision before coding: AGENT_SPEC.md's Task 3 is triggered by *selecting a specific published item*, not by open-ended free-text chat. The current UI is a free-text chat box, which doesn't map 1:1 onto `POST /api/diagnose`'s input (`PublishedItemMetrics` — a specific `content_id`, platform, metrics, etc.).
 
 Recommended approach:
 - Add a lightweight "select content to diagnose" affordance (e.g. a dropdown of a few mock published items, or reuse the existing `SUGGESTIONS` prompts as pre-wired triggers, each mapped to one hardcoded `PublishedItemMetrics` payload).
