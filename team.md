@@ -1,140 +1,286 @@
-# Sada — Production Launch Tasks (team.md)
+# Sada — Hackathon Build Plan (team.md)
 
-**Deadline: 2026-10-16 (tomorrow).**
+**3 days · 4 people · work in parallel from hour one.**
 
-The MVP is now production-capable: login, rate limiting, env-driven config, a real Optimizer, and Render/Vercel deploy config are in place (see [DEPLOYMENT.md](DEPLOYMENT.md)). This file splits the remaining launch work into **4 independent tasks**, one person each. No task needs another task's code to exist first.
+Sada is an AI system for SBA's digital media. It tracks engagement across SBA's official channels, predicts what will go viral, finds the best publish times, explains spikes and drops, and shows it all on a live dashboard.
 
-The original agent contracts (field names, JSON shapes) are in [AGENT_SPEC.md](AGENT_SPEC.md) and [backend/schemas.py](backend/schemas.py). Do not rename existing fields.
+## 📣 Summary for the team: what changed since the MVP
+
+1. **Production-ready platform.** Login (team password), rate limiting, error handling, env-based config, and a deploy setup for Render (backend + Postgres) and Vercel (frontend). The Optimizer now calls the real agent; fake UI (hardcoded notifications, "scheduled" popups, fake uploads) was removed.
+2. **Real SBA data, no more synthetic.** A new **Data Collector agent** pulls every video from the last 60 days on **9 official SBA YouTube channels** into a database, and refreshes the stats every 30 minutes. First collection: **2,901 videos, ~49M views**. The seed file `backend/data/sba_youtube_seed.json.gz` gives you the same data locally in one command.
+3. **Corrected channel list.** 5 of the original 8 YouTube handles were wrong (non-existent, or tiny unofficial channels). The verified list is in [backend/sba_channels.py](backend/sba_channels.py).
+4. **Instagram is collected automatically too**, through Meta's free official API, into the same tables (`platform` = `"instagram"`). The code is built and tested. It goes live once **one teammate does the ≈1 h Meta setup** (see "Instagram setup" below). **Nobody collects anything by hand.**
+5. **X and TikTok are not collected.** Their APIs need a paid subscription (X) or an approval that takes weeks (TikTok). In the pitch, they are future work that plugs into the same pipeline.
+6. **Docs:**
+   - [AGENT_SPEC.md](AGENT_SPEC.md): agent contracts, now including the Data Collector
+   - [DEPLOYMENT.md](DEPLOYMENT.md): how to deploy
+   - [DATA_COLLECTION.md](DATA_COLLECTION.md): data sources + **how to create every API key**
+   - this file: who builds what
+
+**The judges score:**
+
+1. **Behavioral-analysis accuracy**: we must *measure* it, not claim it.
+2. **Ease of use**
+3. **Speed / latency**
+4. **Scalability / reliability**
 
 ---
 
-## Who owns which files
+## What already exists (don't rebuild it)
 
-Independence comes from file ownership. Only edit files in your own row. If you need a change in someone else's file, message them instead of editing it.
+| Piece | Where | Notes |
+|---|---|---|
+| **Data Collector agent** | [backend/agents/data_collector_agent.py](backend/agents/data_collector_agent.py) | Collects **real data from 9 official SBA YouTube channels** (~10.5M subscribers, see [backend/sba_channels.py](backend/sba_channels.py)) and **SBA Instagram accounts** (`instagram_collector.py`) every 30 min on Render, inside a quota budget. Stores a stats **snapshot per refresh**, so velocity is available. |
+| Database | [backend/db.py](backend/db.py) | Tables `channels` (YouTube channels + Instagram accounts), `videos` (YouTube videos + Instagram posts), `video_snapshots`, `collector_runs`. A `platform` column tells them apart. Postgres on Render, SQLite locally. |
+| Read helpers | [backend/repository.py](backend/repository.py) | **Use `analysis_records()` for every analysis.** It removes the account-size and post-age confounds and adds Riyadh-time `publish_hour` / `day_of_week`, `engagement_rate` and **`performance_index`**: the post's main metric ÷ its own account's typical value. Views on YouTube; likes + comments on Instagram, whose API has no views. **Compare across platforms only on `performance_index`.** |
+| Topic taxonomy | [backend/topics.py](backend/topics.py) | 9 topics (`news`, `sports`, `religious`, …). Rule-based on collection, refined by Gemini. |
+| Data API | `GET /api/channels`, `GET /api/videos`, `GET /api/videos/{id}` (with snapshots), `GET /api/collector/status`, `POST /api/collector/run` | All accept `?platform=youtube` or `?platform=instagram` |
+| Platform | Login, rate limiting, deploy config, frontend API client | See [DEPLOYMENT.md](DEPLOYMENT.md). |
+| MVP agents | Behavior, Optimizer, Diagnosis, Live-clip | They run on **synthetic** seed data today. Tasks 1 and 4 move them onto real data. |
 
-| Task | Owns (may edit / create) |
+The original agent contracts are in [AGENT_SPEC.md](AGENT_SPEC.md).
+
+**Data source limits.** YouTube and Instagram are collected automatically through their official, free APIs. Instagram exposes no views, reach or shares for accounts we don't own, only likes and comments. X and TikTok are out of scope because their APIs aren't freely available. Say this openly in the pitch: it's a deliberate, honest scoping decision. Details: [DATA_COLLECTION.md](DATA_COLLECTION.md).
+
+---
+
+## Setup (everyone, first 30 minutes)
+
+```bash
+git pull
+pip install -r backend/requirements-dev.txt
+cp backend/.env.example backend/.env       # add your own GEMINI_API_KEY (DATA_COLLECTION.md section 2); leave SADA_ACCESS_PASSWORD empty
+python -m backend.db_tools import backend/data/sba_youtube_seed.json.gz   # real SBA data, no API key needed
+uvicorn backend.api:app --reload --port 8000
+npm install && npm run dev                  # http://localhost:5173
+pytest backend/tests -q
+```
+
+Only the lead needs a `YOUTUBE_API_KEY`. Everyone else works from the seed file, so we don't burn quota four times. To refresh your data, ask the lead for a new export.
+
+**Keys:** each of you creates your own Gemini key. The YouTube key (lead) and the Meta token (the Instagram-setup owner) are created once, step by step, per [DATA_COLLECTION.md](DATA_COLLECTION.md). **Never commit a key or paste it in the group chat.**
+
+---
+
+## File ownership (this is what makes the 4 tasks independent)
+
+| Task | Owns |
 |---|---|
-| 1 — Deploy, CI & Ops | `render.yaml`, `.github/workflows/*` (new), `eslint.config.js` (new), `package.json` (scripts/devDeps only), `DEPLOYMENT.md` |
-| 2 — Real Dashboard Analytics | `src/components/DashboardView.tsx`, `backend/analytics.py` (new), `backend/tests/test_analytics.py` (new) |
-| 3 — Broadcast & Diagnosis Completion | `src/components/BroadcastView.tsx`, `backend/tests/test_broadcast_api.py` (new) |
-| 4 — Security Hardening & QA | `src/App.tsx`, `src/components/Sidebar.tsx`, `vercel.json` (new), `backend/security.py` (new) |
+| **1 — Patterns & Optimizer** | `backend/agents/behavior_analysis_agent.py`, `backend/agents/content_optimizer_agent.py`, `src/components/OptimizerView.tsx`, `backend/tests/test_behavior_analysis.py`, `backend/tests/test_content_optimizer.py` |
+| **2 — Trends & Viral Prediction** | `backend/agents/trend_prediction_agent.py` (new), `src/components/TrendingPanel.tsx` (new), `src/components/AccuracyCard.tsx` (new), `backend/tests/test_trend_prediction.py` (new) |
+| **3 — Live Dashboard & Analytics** | `backend/analytics.py` (new), `src/components/DashboardView.tsx`, `src/App.tsx`, `src/components/Sidebar.tsx`, `backend/tests/test_analytics.py` (new), `vercel.json` (new), `.github/workflows/ci.yml` (new) |
+| **Instagram setup** (one person, see below) | `SBA_INSTAGRAM_ACCOUNTS` in `backend/sba_channels.py` (that list only) |
+| **4 — Spikes, Drops & Diagnosis** | `backend/agents/anomaly_agent.py` (new), `backend/agents/diagnostic_recommendation_agent.py`, `src/components/BroadcastView.tsx` (becomes the alerts view), `src/components/AlertsPanel.tsx` (new), `backend/tests/test_anomaly.py` (new), `backend/tests/test_diagnostic_recommendation.py` |
 
-**`backend/api.py` is shared.** Tasks 2, 3 and 4 each add a few lines to it. Only *append* inside a comment block with your task number, for example `# --- Task 2: analytics ---`. Don't reorder or edit existing routes. Merge conflicts are then trivial.
+**Shared files.** Append only, inside your own `# --- Task N ---` block, and never edit someone else's block:
+- `backend/api.py` (your routes)
+- `backend/schemas.py` (your response models)
+- `src/types/index.ts`
 
-Locked files: nobody edits `src/lib/api.ts`, `backend/auth.py`, `backend/config.py` or `backend/schemas.py` (existing models) without telling the whole team.
-
----
-
-## Task 1 — Deploy, CI & Ops
-
-**Owner:** _(assign)_
-
-**Goal:** Sada is live on its production URLs, and every push is automatically checked.
-
-1. **Deploy** following [DEPLOYMENT.md](DEPLOYMENT.md): backend to Render (Blueprint from `render.yaml`), then frontend to Vercel with `VITE_API_BASE` set. Set `CORS_ORIGINS` to the final Vercel domain, including any custom domain.
-2. **Secrets:** generate a strong `SADA_ACCESS_PASSWORD` (≥ 16 chars) and share it with the team out-of-band (not in Slack/Git). Confirm `SADA_SECRET_KEY` was auto-generated.
-3. **Fix lint:** `npm run lint` currently fails because there is no `eslint.config.js`. Add a flat config using the already-installed `@eslint/js`, `typescript-eslint`, `eslint-plugin-react-hooks` and `eslint-plugin-react-refresh`. Fix only lint *config*. If the rules flag code in someone else's file, report it to them.
-4. **CI:** add `.github/workflows/ci.yml` that runs on every push and PR:
-   - `pip install -r backend/requirements-dev.txt` → `pytest backend/tests`
-   - `npm ci` → `npm run lint` → `npm run build`
-5. **Monitoring:**
-   - Free uptime monitor (e.g. UptimeRobot) on `https://<render-url>/health`, alerting the team email.
-   - A budget alert in Google Cloud / AI Studio on the Gemini key.
-6. Run the smoke-test checklist in DEPLOYMENT.md against production and tick it off in the PR.
-
-**Done when:** both production URLs work, the smoke test passes, CI is green on `main`, and the uptime monitor is active.
+**Locked files.** Ask in the team chat before touching these:
+- `backend/db.py`, `backend/repository.py`
+- `backend/agents/data_collector_agent.py`, `backend/agents/youtube_client.py`, `backend/agents/instagram_client.py`, `backend/agents/instagram_collector.py`
+- `backend/auth.py`, `backend/config.py`
+- `src/lib/api.ts`
 
 ---
 
-## Task 2 — Real Dashboard Analytics
+## API contracts (agreed now so frontend and backend can work in parallel)
 
-**Owner:** _(assign)_
+Frontend work can start on day 1 against these shapes with mocked JSON, then switch to the real endpoint when it lands. **Don't change a shape without telling the team.** `VideoOut` is the existing model in `backend/schemas.py`. It covers YouTube videos *and* Instagram posts: check `platform`, and use `url` for links, never a hand-built YouTube URL.
 
-**Goal:** Every number on the Dashboard comes from data, not hardcoded constants.
+```text
+Task 1  GET  /api/patterns                         -> Pattern[]   (existing shape; add sources "real_youtube_sba" / "real_instagram_sba")
+        POST /api/optimize                         -> OptimizationResult (existing shape, additive fields only)
 
-**Currently fake** in [DashboardView.tsx](src/components/DashboardView.tsx):
-- the KPI cards (e.g. `14.2M`)
-- the `weeklyData` area chart
-- the `platforms` breakdown (`5.4M تفاعل`, …)
-- the today / week / month period filter, which changes nothing
+Task 2  GET  /api/trending?hours=24&limit=10       -> TrendingItem[]   (YouTube only: needs view counts)
+          TrendingItem = { video: VideoOut, views_per_hour: float, velocity_index: float,
+                           viral_score: float (0-1), predicted_views_7d: int | null, reason: str }
+        GET  /api/model/accuracy                   -> ModelAccuracy
+          ModelAccuracy = { method: str, train_window: str, test_window: str, n_test: int,
+                            mape: float, baseline_mape: float, top10_hit_rate: float, computed_at: datetime }
 
-**Steps:**
-1. Create `backend/analytics.py` with a pure function `summary() -> dict` that computes:
-   - **KPIs** from `backend/data/engagement_records.json`: total views, total engagement (likes + shares), average watch time, record count.
-   - **Engagement by day of week** from the same file (`day_of_week` field), to replace `weeklyData`.
-   - **Platform breakdown** from the real `backend/data/hajj_1445_platform_totals.json`. Only compare platforms that report the same metric (see the `note` in that file). Use `null` for unreported values, never `0`.
-   - A `sources` list naming which file each block came from, so the UI can label real vs. synthetic data.
-2. In `backend/api.py` (Task 2 block), add `GET /api/analytics/summary` on the authenticated `api` router.
-3. Wire DashboardView to it with `apiFetch` (from `src/lib/api.ts`). Use the same loading/error pattern as the pattern cards already in that file.
-4. **Period filter:** the dataset has no dates, so it can't be filtered by period. Remove the filter rather than fake it.
-5. Under each chart, add a small label showing the data source: "بيانات حقيقية – حج 1445هـ" or "بيانات تجريبية".
-6. Add `backend/tests/test_analytics.py`: totals match a manual sum over the JSON, and unreported platform metrics stay `null`.
+Task 3  GET  /api/analytics/summary?days=30        -> AnalyticsSummary
+          AnalyticsSummary = { generated_at, data_as_of (last successful collector run),
+            totals:      { posts, views, likes, comments, engagement_rate },        (views: YouTube only)
+            by_platform: [{ platform, accounts, posts, followers, likes, comments }],
+            by_channel:  [{ platform, entity_key, name_ar, subscriber_count, posts, views (null on Instagram),
+                            median_performance_index, engagement_rate }],
+            by_content_type: [{ platform, content_type, posts, median_performance_index }],
+            by_topic:    [{ topic, label_ar, posts, median_performance_index }],
+            best_times:  [{ platform, day_of_week, hour, median_performance_index, n }] }
 
-**Done when:** `grep` finds no hardcoded metric values left in DashboardView.tsx, tests pass, and each chart shows its data source.
+Task 4  GET  /api/alerts?days=7                    -> Alert[]
+          Alert = { alert_id, kind: "spike" | "drop", video: VideoOut,
+                    metric: "views" | "interactions", observed: int, expected: int,
+                    ratio: float, severity: "high" | "medium", detected_at: datetime }
+        POST /api/diagnose/video  { video_id }     -> DiagnosisResult (existing shape)
+```
+
+**Embedded components.** Task 3's DashboardView renders these, and their owners build them:
+- `<TrendingPanel />` and `<AccuracyCard />` from Task 2
+- `<AlertsPanel compact />` from Task 4
+
+Each component fetches its own data and takes no required props. Task 3 can start with a placeholder `<div>` until they land.
 
 ---
 
-## Task 3 — Broadcast & Diagnosis Completion
+## Task 1 — Patterns & Optimizer on real data
+
+*Challenge items 2, 3, 5 (predictive content, best time and channel, recommendations)*
 
 **Owner:** _(assign)_
 
-**Goal:** The Broadcast view only shows things that are real, and the per-item diagnosis agent (`POST /api/diagnose`, built and tested, but no UI calls it yet) is usable.
+1. **Behavior agent.** Add `analyze_real_data()` that reads `repository.analysis_records()` and reuses the existing `_slice_pattern` statistics (Welch t-test, `MIN_SAMPLES`, `MIN_LIFT`).
+   - Score on `performance_index`, not raw counts. Run each platform separately, then once across both for a `platform` dimension ("Reels on Instagram vs. Shorts on YouTube").
+   - New dimensions: `content_type`, `publish_hour` bucket and `day_of_week` (Riyadh time), `topic`, and `channel|topic`.
+   - Tag patterns `source: "real_youtube_sba"` or `"real_instagram_sba"`. Extend the `dimension` Literal in `schemas.Pattern` inside your block.
+   - Keep the synthetic and Hajj patterns, but real ones must come first.
+2. **Make `run()` include real patterns.** Then `POST /api/patterns/refresh` rebuilds from the database.
+3. **Optimizer.** It recommends **platform + account + content type + publish slot** from real patterns.
+   - Add an optional `channel_options: list[str]` (entity keys) to `DraftContent`, additive only.
+   - Time windows come from the real best hours, not the 4 hardcoded buckets.
+   - Topics come from `backend/topics.py`.
+4. **OptimizerView.** Replace the platform buttons with SBA account chips from `GET /api/channels`, grouped by platform. Replace the topic list with the 9 real topics.
+5. **Tests.** Real-data patterns appear from a seeded test DB (see `backend/tests/test_data_collector.py` for the fake-YouTube fixtures). A slice under `MIN_SAMPLES` is never surfaced.
 
-**Steps:**
-1. **Per-item diagnosis:**
-   - In `backend/api.py` (Task 3 block), add `GET /api/content/history`. It returns `backend/data/content_history.json` (42 items, `HistoricalContentItem` shape) via the existing `diagnostic_recommendation_agent._load_history()`.
-   - In the chat panel, add a "اختر محتوى لتشخيصه" dropdown fed by that endpoint.
-   - On select, build a `PublishedItemMetrics` body from the item and call `POST /api/diagnose`. Use the same `apiFetch` / `describeError` handling and message rendering the existing AWJ diagnosis prompts already use (`runDiagnosis`, `renderDiagnosisMessage`).
-   - Keep the two existing AWJ prompts as they are.
-2. **Video player:** there is no real video stream. The play/pause button only toggles an icon. Either remove the fake controls, or clearly label the panel "إعادة بث محاكاة" (simulated replay) and make play/pause animate the timeline cursor over the real signal. Pick one; don't leave controls that do nothing.
-3. **Clip approval:** "اعتماد المقطع" has no backend. Keep it as a UI approval, but add "نسخ توقيت المقطع" to copy `start–end + segment_label` to the clipboard so editors can actually use it.
-4. Add `backend/tests/test_broadcast_api.py` using FastAPI `TestClient` (see `backend/tests/test_api.py` for the auth/login fixture pattern). Cover:
-   - `/api/content/history` requires auth and returns 42 items.
-   - `/api/broadcast/detect-clips` returns the 2 seeded spikes.
+**Done when:** the dashboard pattern cards show real SBA patterns with real numbers. For example: "Shorts on @Riyadiyatv after 9pm get 2.1× the channel's usual views (n=84, t=4.2)."
+
+---
+
+## Task 2 — Trends, viral prediction & measured accuracy
+
+*Challenge item 2 plus the **accuracy** criterion*
+
+**Owner:** _(assign)_
+
+1. **`trend_prediction_agent.py`.**
+   - **Scope: YouTube only.** Trending and prediction need view counts, which Instagram doesn't expose. Filter on `platform == "youtube"`.
+   - **Velocity:** from `video_snapshots`, compute views/hour between the last two snapshots. `velocity_index` = that velocity ÷ the channel's median velocity for videos of the same age bucket.
+   - **Viral score:** a 0–1 score from early velocity, channel baseline and content type. Keep it explainable; `reason` says why in Arabic.
+   - **Prediction:** `predicted_views_7d` from early views using the channel's typical growth curve, i.e. the median ratio of day-7 views to day-1 views in our snapshot history. Return `null` when history is too short; never guess.
+2. **Backtest (the judges' accuracy number).**
+   - Hold out the newest ~20% of videos (by publish date).
+   - Predict their 7-day views from their first-day data.
+   - Report MAPE plus top-10 hit rate: of our predicted top 10, how many were in the actual top 10.
+   - Compare against a naive baseline (predict "channel median") so the number means something.
+   - Cache the result and recompute at most hourly.
+3. **Endpoints:** `GET /api/trending` and `GET /api/model/accuracy`, per the contracts above.
+4. **UI.**
+   - `TrendingPanel.tsx`: the top videos now, with thumbnail (`https://i.ytimg.com/vi/{id}/mqdefault.jpg`), channel, views/hour, a viral-score bar and a link to YouTube.
+   - `AccuracyCard.tsx`: MAPE vs. baseline and the hit rate, plus one sentence explaining the method.
+5. **Tests:** synthetic snapshot series with a known growth curve → the prediction is within tolerance; the backtest beats the naive baseline on the fixture.
+
+**Done when:** the dashboard shows what's trending right now across SBA, and a real, reproducible accuracy number beats the baseline.
+
+---
+
+## Task 3 — Live dashboard, analytics & delivery
+
+*Challenge items 1 and 6 plus the **usability, latency and reliability** criteria*
+
+**Owner:** _(assign)_
+
+1. **`backend/analytics.py` + `GET /api/analytics/summary`**, per the contract above. Build it from `repository.analysis_records()`, and read `data_as_of` from `collector_runs`.
+   - **Cache in memory for 60 s.** The target is under 100 ms, and that latency is part of the score.
+2. **DashboardView.**
+   - Replace every hardcoded number (KPI cards, `weeklyData`, `platforms`, the period filter) with the summary.
+   - Add:
+     - a **YouTube / Instagram / all** platform switch
+     - a cross-channel comparison chart
+     - a **best-time heatmap** (day × hour of `median_performance_index`), per platform
+     - topic and content-type breakdowns
+   - Embed `<TrendingPanel/>`, `<AccuracyCard/>` and `<AlertsPanel compact/>`.
+   - **Auto-refresh every 60 s.** Show "آخر تحديث للبيانات: قبل X دقيقة" from `data_as_of`.
+3. **App shell.**
+   - Remove the fake status badges ("بث مباشر متصل", "تزامن الوكلاء نشط") and replace them with a real collector-status pill from `/api/collector/status`.
+   - Remove the dead search box.
+   - Lazy-load views with `React.lazy` to clear the 619 kB bundle warning.
+   - Rename navigation labels to match the new views.
+4. **Delivery.**
+   - `.github/workflows/ci.yml` runs on every push/PR:
+     - pytest on SQLite, then again against a Postgres service container via `SADA_TEST_DATABASE_URL`
+     - `npm ci`, `npm run build`
+     - add lint once an `eslint.config.js` exists
+   - `vercel.json` with security headers.
+   - Deploy per [DEPLOYMENT.md](DEPLOYMENT.md) on **day 2**, not day 3.
+5. **Load test** (reliability score): `pip install locust`; run 50 users against `/api/analytics/summary` and `/api/trending`. Put p95 latency and the error rate in the pitch.
+
+**Done when:** the production dashboard shows only real numbers, refreshes itself, loads fast, and CI is green.
+
+---
+
+## Task 4 — Spikes, drops & root-cause diagnosis
+
+*Challenge items 4 and 5*
+
+**Owner:** _(assign)_
+
+1. **`anomaly_agent.py` + `GET /api/alerts`.**
+   - For each recent post, compare `observed` with `expected` on its platform's main metric: views on YouTube, likes + comments on Instagram. Expected = the account's median for the same content type at the **same age**; snapshots give values at each age.
+   - Flag `ratio ≥ 3` as a spike and `ratio ≤ 0.33` as a drop, with high/medium severity.
+   - **Also detect sudden velocity changes** between consecutive snapshots: a video that suddenly takes off, or stalls.
+2. **Diagnosis on real videos: `POST /api/diagnose/video`.**
+   - Retrieve comparable posts from the database (same platform + account + topic + content type, ±14 days).
+   - Compare on publish hour, duration, title features (question mark, numbers, emoji, length) and engagement rate.
+   - Pass that evidence to the existing Gemini synthesis, and return the existing `DiagnosisResult` shape.
+   - **Every factor must cite real comparable posts** (`evidence_url_or_ref` = the post's `url`, YouTube or Instagram).
+   - No comparables → `low_confidence: true`. Never invent a reason.
+3. **Alerts view.** Turn `BroadcastView.tsx` into "التنبيهات والتشخيص":
+   - an alert list (spike = green, drop = red)
+   - clicking an alert runs the diagnosis
+   - the chat shows the diagnosis with linked evidence
+   - Keep the live-clip demo only if it is clearly labeled as a simulation. Otherwise remove it.
+   - Also build `AlertsPanel.tsx` (the compact version, for the dashboard).
+4. **Tests:** fixture with one clear spike, one clear drop and normal noise → only the two are flagged. A diagnosis with no comparables returns `low_confidence`.
+
+**Done when:** you can click a real SBA video that under-performed and get a specific, evidence-linked explanation that differs from an over-performer's.
+
+---
+
+## Instagram setup (one person, ≈1 hour, day 1 morning)
+
+*Challenge item 1: cross-platform analytics*
+
+**Owner:** _(assign; suggested: the Task 4 owner, whose day-1 morning is the lightest)_
+
+The Instagram collector is **already built and tested**. It only needs credentials and the list of official accounts. Follow [DATA_COLLECTION.md](DATA_COLLECTION.md) section 3, step by step:
+
+1. Create or convert an Instagram **professional** account we control and link it to a Facebook Page (3.1).
+2. Create the Meta developer app (3.2).
+3. Generate the token, extend it to 60 days, and find our `INSTAGRAM_BUSINESS_ACCOUNT_ID` (3.3).
+4. **Verify SBA's official Instagram handles** with the Business Discovery test query, and add them to `SBA_INSTAGRAM_ACCOUNTS` in [backend/sba_channels.py](backend/sba_channels.py). PR: `data: verified Instagram accounts` (3.4).
+5. Send `META_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ACCOUNT_ID` **privately to the lead** (3.5). Don't use the group chat, and never commit them.
 
 **Done when:**
-- Picking one over-performing and one under-performing item in the dropdown gives different, evidence-cited diagnoses.
-- No control in the Broadcast view is a no-op.
-- Tests pass.
+- `python -m backend.agents.data_collector_agent --platform instagram` collects posts locally with status `success`
+- the verified-accounts PR is merged
+- the lead has the credentials on Render
+
+Deadline: **day 1, 18:00**.
 
 ---
 
-## Task 4 — Security Hardening & QA
+## Timeline
 
-**Owner:** _(assign)_
+| | Day 1 | Day 2 | Day 3 |
+|---|---|---|---|
+| **All** | Setup, Gemini key and seed import (30 min). Instagram setup done by 18:00 (one person) | **Deploy** (Task 3 leads); Instagram data flowing in production; everyone checks their feature on real YouTube + Instagram data | Code freeze **at noon**; bug fixes only, then demo rehearsal |
+| **Backend** | Agent + endpoint + tests, working on seed data | Tune on fresh production data; performance | Fixes |
+| **Frontend** | UI against mocked JSON from the contracts | Switch to real endpoints; polish; Arabic copy | Fixes |
 
-**Goal:** Close the remaining security gaps and catch UI bugs before users do.
-
-**Steps:**
-1. **Backend security headers:**
-   - Create `backend/security.py` with a small Starlette middleware that adds `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and `Strict-Transport-Security` (only when `config.IS_PRODUCTION`).
-   - Register it in `backend/api.py` (Task 4 block, one `app.add_middleware(...)` line).
-   - Add one test asserting the headers are present.
-2. **Frontend headers:** add `vercel.json` with the same headers plus a `Content-Security-Policy`. It must allow `connect-src` to the Render API URL and Google Fonts if the app uses them. Verify that the deployed site still loads with no CSP errors in the console.
-3. **Remove fake status UI:**
-   - App.tsx: "بث مباشر متصل" is always shown, and the search box does nothing. Remove the search box.
-   - Sidebar.tsx: "تزامن الوكلاء نشط" is always shown.
-   - For the status pills, either drive them from a real `GET /health` check (green when the API responds, grey when it doesn't) or remove them.
-4. **Bundle size:** the JS bundle is 619 kB (Vite warns). Lazy-load the three views in App.tsx with `React.lazy` + `Suspense` so Recharts loads only with the Dashboard.
-5. **Dependency audit:**
-   - Run `npm audit --omit=dev` and `pip install pip-audit && pip-audit -r backend/requirements.txt`.
-   - Fix high/critical issues by bumping versions. Coordinate `package.json` changes with Task 1's owner.
-6. **QA pass** on the production (or local) build, in Chrome, Safari/Edge and a 390 px-wide mobile viewport:
-   - **Login:** wrong password, right password, 6 fast wrong attempts → "محاولات كثيرة".
-   - **Session expiry:** delete `sada.token` in DevTools → the next action returns to login.
-   - **Error states:** stop the backend → every view shows an Arabic error toast, no blank screen. Remove `GEMINI_API_KEY` → Optimizer and Diagnosis show the "not configured" message.
-   - **RTL:** layout and text alignment in all three views.
-   - Log every bug as a GitHub issue tagged with the owning task's number (see the ownership table) so the right person fixes it.
-
-**Done when:** headers verified with `curl -I` on both deployments, no fake status indicators remain, the bundle warning is gone, the audit is clean of high/critical issues, and the QA issues are filed.
+**Daily sync** at 9:00 and 18:00, 15 minutes: what merged, what's blocked, any contract changes.
 
 ---
 
-## Shared rules for all 4 tasks
+## Shared rules
 
-- **Branch per task** (`task-1-deploy`, `task-2-analytics`, …). Open a PR into `main`; CI (from Task 1) must be green before merging.
-- **All HTTP calls go through `apiFetch` / `describeError`** in `src/lib/api.ts`. Never hardcode a URL or the `localhost:8000` port, and never call `fetch` directly.
-- **All new `/api` routes go on the authenticated `api` router** in `backend/api.py`. Only `/health` and `/api/auth/*` are public.
-- **No fake data or no-op controls.** If something can't be backed by real data or a real action before the deadline, remove it or label it clearly as sample/simulated. Shipping a fake number is worse than shipping fewer numbers.
-- **Run `pytest backend/tests` and `npm run build` locally** before opening your PR.
-- **Flag, don't guess.** If you need a field or endpoint that doesn't exist, raise it with the team instead of inventing a shape in your own file.
+- **Branch per task:** `task-1-patterns`, `task-2-trends`, `task-3-dashboard`, `task-4-alerts`. Open small PRs into `main` at least daily. CI must be green before merging.
+- **Real numbers only.** If something can't be computed from the data, hide it or label it "تجريبي". A fake number on stage costs more credibility than a missing chart.
+- **Never treat missing as zero.** Likes and comments can be `null` (hidden by the account). Instagram views are always `null`.
+- **Riyadh time** for anything hour- or day-based. `analysis_records()` already converts it.
+- **All HTTP goes through `apiFetch`** in `src/lib/api.ts`. New `/api` routes go on the authenticated `api` router.
+- **Every agent output cites evidence:** a number, a sample size, or a link to a real video.
+- **Don't spend YouTube quota from laptops.** Use the seed file; production collects on its own.
+- **Compare platforms only on `performance_index`.** Raw YouTube views and Instagram likes measure different things.
+- **Keys stay private:** never commit them, paste them in the group chat or show them on screen. If one leaks, regenerate it ([DATA_COLLECTION.md](DATA_COLLECTION.md) section 1).

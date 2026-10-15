@@ -7,6 +7,7 @@ tasks stay independent of each other's in-progress code. Do not rename.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -185,3 +186,89 @@ class ClipOpportunity(BaseModel):
 class BroadcastSnapshot(BaseModel):
     signal: list[BroadcastSignalPoint]
     segments: list[BroadcastSegment]
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — Data Collector Agent (real SBA YouTube data, see backend/db.py)
+# ---------------------------------------------------------------------------
+
+
+class ChannelOut(BaseModel):
+    channel_id: str
+    platform: Literal["youtube", "instagram"]
+    entity_key: str
+    handle: str
+    name_ar: str
+    title: str | None = None
+    subscriber_count: int | None = None
+    video_count: int | None = None
+    view_count: int | None = None
+    updated_at: datetime | None = None
+    tracked_videos: int = 0
+
+
+class VideoOut(BaseModel):
+    """A YouTube video or an Instagram post (see `platform`). `title` is the caption on Instagram."""
+
+    video_id: str
+    platform: Literal["youtube", "instagram"]
+    channel_id: str
+    entity_key: str
+    channel_name_ar: str
+    title: str
+    url: str
+    published_at: datetime
+    duration_seconds: int | None = None
+    content_type: Literal["short", "video", "live", "image", "carousel"]
+    topic: str
+    topic_source: Literal["rule", "llm"]
+    view_count: int | None = None
+    like_count: int | None = None
+    comment_count: int | None = None
+    stats_updated_at: datetime | None = None
+
+
+class VideoPage(BaseModel):
+    total: int
+    items: list[VideoOut]
+
+
+class VideoSnapshotOut(BaseModel):
+    captured_at: datetime
+    view_count: int | None = None
+    like_count: int | None = None
+    comment_count: int | None = None
+
+
+class VideoDetail(VideoOut):
+    snapshots: list[VideoSnapshotOut]
+
+
+class CollectorRunOut(BaseModel):
+    id: int
+    trigger: str
+    status: str
+    started_at: datetime
+    finished_at: datetime | None = None
+    new_videos: int | None = 0
+    updated_videos: int | None = 0
+    snapshots: int | None = 0
+    llm_classified: int | None = 0
+    quota_units: int | None = 0
+    instagram_calls: int | None = 0
+    error: str | None = None
+
+
+class CollectorStatus(BaseModel):
+    enabled: bool
+    youtube_enabled: bool
+    instagram_enabled: bool
+    instagram_calls_last_24h: int
+    schedule_enabled: bool
+    interval_minutes: int
+    lookback_days: int
+    total_channels: int
+    total_videos: int
+    total_snapshots: int
+    quota_units_last_24h: int
+    runs: list[CollectorRunOut]

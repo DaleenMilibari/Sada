@@ -41,6 +41,36 @@ LOGIN_RATE_LIMIT_PER_MINUTE = int(os.environ.get("SADA_LOGIN_RATE_LIMIT_PER_MINU
 TRUSTED_PROXY_HOPS = int(os.environ.get("SADA_TRUSTED_PROXY_HOPS", "0"))
 
 
+# --- Database ----------------------------------------------------------------
+# Render's Postgres sets DATABASE_URL; locally we fall back to a SQLite file.
+_DEFAULT_SQLITE = Path(__file__).parent / "store" / "sada.db"
+DATABASE_URL = os.environ.get("DATABASE_URL") or f"sqlite:///{_DEFAULT_SQLITE.as_posix()}"
+
+# --- Data Collector agent (YouTube) ------------------------------------------
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
+# Rolling window of uploads to track per channel (SBA channels hold ~276K videos in total).
+COLLECTOR_LOOKBACK_DAYS = int(os.environ.get("COLLECTOR_LOOKBACK_DAYS", "60"))
+COLLECTOR_MAX_VIDEOS_PER_CHANNEL = int(os.environ.get("COLLECTOR_MAX_VIDEOS_PER_CHANNEL", "3000"))
+# YouTube API units one run may spend (free daily quota is 10,000).
+COLLECTOR_QUOTA_PER_RUN = int(os.environ.get("COLLECTOR_QUOTA_PER_RUN", "600"))
+# Videos per run whose rule-based topic is refined by Gemini (0 disables).
+COLLECTOR_LLM_CLASSIFY_PER_RUN = int(os.environ.get("COLLECTOR_LLM_CLASSIFY_PER_RUN", "400"))
+
+# --- Data Collector agent (Instagram, Graph API Business Discovery) ----------
+META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
+# The id of *our own* Instagram business account that performs the lookups.
+INSTAGRAM_BUSINESS_ACCOUNT_ID = os.environ.get("INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
+META_GRAPH_API_VERSION = os.environ.get("META_GRAPH_API_VERSION", "v23.0")
+# Once an account's window is backfilled, each run re-reads only this many recent days.
+INSTAGRAM_REFRESH_DAYS = int(os.environ.get("INSTAGRAM_REFRESH_DAYS", "7"))
+INSTAGRAM_MAX_PAGES_PER_ACCOUNT = int(os.environ.get("INSTAGRAM_MAX_PAGES_PER_ACCOUNT", "10"))
+INSTAGRAM_ENABLED = bool(META_ACCESS_TOKEN and INSTAGRAM_BUSINESS_ACCOUNT_ID)
+
+# In-process scheduler. Off by default so local reloads don't burn quota.
+COLLECTOR_SCHEDULE_ENABLED = os.environ.get("COLLECTOR_SCHEDULE_ENABLED", "false").lower() == "true"
+COLLECTOR_INTERVAL_MINUTES = int(os.environ.get("COLLECTOR_INTERVAL_MINUTES", "30"))
+
+
 def validate() -> None:
     """Fail fast at startup rather than serving an insecure production instance."""
     if not IS_PRODUCTION:

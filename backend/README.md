@@ -1,6 +1,8 @@
-# Sada Backend - Agent Intelligence (AGENT_SPEC.md Tasks 1-4)
+# Sada Backend - Agent Intelligence (AGENT_SPEC.md Tasks 1-5)
 
-Implements the four agents specified in [AGENT_SPEC.md](../AGENT_SPEC.md). There was no
+Implements the agents specified in [AGENT_SPEC.md](../AGENT_SPEC.md): the
+original four MVP agents (Tasks 1-4) plus the Data Collector agent (Task 5),
+which gathers real SBA YouTube data into the database. There was no
 pre-existing backend or `backend-buildout-prompt.md` in this repo, so the
 data schemas, seed datasets and API contracts here were designed from
 scratch, following AGENT_SPEC.md's documented field names/JSON shapes exactly.
@@ -80,6 +82,45 @@ tagged `"source": "real_awj_sada"` / `"dimension": "awj_sada_real"` in the
 pattern store, alongside the synthetic and Hajj patterns rather than
 replacing them.
 
+## Real data: SBA YouTube channels + Instagram accounts (Data Collector agent)
+
+`backend/agents/data_collector_agent.py` collects every upload from the last
+`COLLECTOR_LOOKBACK_DAYS` (default 60) on the 9 official SBA YouTube channels
+in `backend/sba_channels.py`, into the database in `backend/db.py` (SQLite
+locally, Postgres on Render):
+
+| Table | Contents |
+|---|---|
+| `channels` | YouTube channels and Instagram accounts (`platform`): metadata + subscriber/follower totals |
+| `videos` | One row per YouTube video or Instagram post: title/caption, `url`, publish time (UTC), duration, `content_type` (short/video/live/image/carousel), `topic` (`backend/topics.py`), latest views/likes/comments (`NULL` when hidden; Instagram views are always `NULL`) |
+| `video_snapshots` | Stats at every refresh - the time series behind velocity, trending and spike/drop detection |
+| `collector_runs` | One row per run: status, counts, quota spent, error |
+
+Each run spends at most `COLLECTOR_QUOTA_PER_RUN` YouTube units: new uploads
+first, then stats refreshes prioritised by age (videos <2 days old every 30 min,
+<7 days every 2 h, <30 days daily, older weekly). Topics are keyword/channel
+rules on ingest, refined by Gemini for up to `COLLECTOR_LLM_CLASSIFY_PER_RUN`
+videos per run. Shorts are detected heuristically (the API doesn't flag them):
+<=60s, or <=180s and tagged `#shorts`.
+
+Instagram (`instagram_collector.py`) reads the accounts in `SBA_INSTAGRAM_ACCOUNTS` through the Graph
+API's Business Discovery. It needs `META_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ACCOUNT_ID`
+(setup: [DATA_COLLECTION.md](../DATA_COLLECTION.md) section 3) and is skipped without them.
+
+```bash
+python -m backend.agents.data_collector_agent --budget 1000        # collect all configured platforms
+python -m backend.agents.data_collector_agent --platform instagram # one platform only
+python -m backend.db_tools export backend/data/sba_youtube_seed.json.gz
+python -m backend.db_tools import backend/data/sba_youtube_seed.json.gz
+```
+
+For analysis, use `repository.analysis_records()`. It normalizes each post's main metric
+(views on YouTube, likes + comments on Instagram) per account + content type into
+`performance_index`, drops posts too young to compare, and converts times to Riyadh.
+
+**Local database out of date?** If you see `SchemaOutdated` on startup, delete
+`backend/store/sada.db` and re-import the seed.
+
 ## Running an agent directly
 
 ```bash
@@ -98,14 +139,26 @@ them through the API below.
 uvicorn backend.api:app --reload
 ```
 
-- `POST /api/patterns/refresh` - re-run Task 1 over the seed dataset, upserts the store
+Public:
+- `GET  /health` - liveness probe
+- `GET  /api/auth/status`, `POST /api/auth/login` - login (`{password}` -> bearer token)
+
+Authenticated (`Authorization: Bearer <token>` when `SADA_ACCESS_PASSWORD` is set):
+- `POST /api/patterns/refresh` - re-run Task 1, upserts the store
 - `GET  /api/patterns` - read the current pattern store
 - `POST /api/optimize` - Task 2, body = `DraftContent`
 - `POST /api/diagnose` - Task 3, body = `PublishedItemMetrics`
-- `POST /api/broadcast/detect-clips` - Task 4, body = optional signal override, else uses the seeded mock broadcast
+- `POST /api/diagnose/awj-sada` - Task 3 on the real AWJ dataset
+- `POST /api/broadcast/detect-clips`, `GET /api/broadcast/signal` - Task 4
+- `GET  /api/channels` - tracked SBA channels with subscriber counts
+- `GET  /api/videos` - collected videos; filters `channel`, `content_type`, `topic`, `days`, `sort`, `limit`, `offset`
+- `GET  /api/videos/{video_id}` - one video with its stats snapshots
+- `GET  /api/collector/status`, `POST /api/collector/run` - Task 5 runs and quota use
 
-LLM-dependent endpoints return `503` with a clear message if
-`GEMINI_API_KEY` isn't set, rather than failing silently.
+Error handling:
+- LLM-dependent endpoints return `503` if `GEMINI_API_KEY` isn't set, `502` if the model call fails.
+- Gemini and login routes return `429` when rate limited.
+- `/docs` is available only outside production.
 
 ## Tests
 
@@ -133,6 +186,6 @@ scoring/retrieval/evidence logic around them directly.
   a draft/item programmatically instead of regexing the Arabic pattern text.
   The fields AGENT_SPEC.md documents (`pattern`, `supporting_metric`,
   `confidence`, `affected_content_types`) are unchanged.
-- Frontend rewiring (making `src/components/*View.tsx` call this API
-  instead of their hardcoded mock data) is a follow-up, not part of this
-  pass.
+- The frontend calls this API through `src/lib/api.ts`, using `VITE_API_BASE` as the base URL.
+- Tests run on a throwaway SQLite database (`backend/tests/conftest.py`). Set
+  `SADA_TEST_DATABASE_URL` to run the whole suite against Postgres instead.

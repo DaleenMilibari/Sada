@@ -2,7 +2,7 @@
 
 > Original MVP spec for the four agents. Field names and JSON shapes here are the contract the backend implements. Current team work lives in [team.md](team.md).
 
-This file splits the remaining **agent intelligence** work into 4 independent tasks. Each task can be built by one person in their own file, against the stub contracts already wired into the backend (see `backend-buildout-prompt.md`). No task requires another task's code to exist first — each agent reads from the shared seed/mock data and returns its own structured JSON.
+This file specifies the agents. Tasks 1–4 are the original MVP agents, and Task 5 (the Data Collector) was added for production. Each agent lives in its own file under `backend/agents/` and returns its own structured JSON (Pydantic models in `backend/schemas.py`).
 
 Every agent below is specified using the project's required Agentic AI fields (Goal, Input, Trigger, Tools, Data/Context, Reasoning task, Decision, Action/Output, Memory/state, Evidence, Failure/fallback) — do not simplify an agent down to a single LLM prompt; each should visibly choose between options, use evidence, and produce a structured decision.
 
@@ -89,6 +89,60 @@ Every agent below is specified using the project's required Agentic AI fields (G
 - **Failure/fallback:** If the engagement signal is too noisy/flat to detect a confident spike, return no clip opportunities rather than forcing a low-confidence flag.
 
 **Acceptance criteria:** Fed a mock time series with 1–2 obvious spikes and some noise, the agent flags the real spikes (with correct segment alignment) and does not flag the noise.
+
+---
+
+## Task 5 — Data Collector Agent (added for production)
+
+**Status:** built.
+**File:** `backend/agents/data_collector_agent.py` (+ `youtube_client.py`, `instagram_client.py`, `instagram_collector.py`, `backend/db.py`, `backend/sba_channels.py`, `backend/topics.py`)
+
+- **Goal:** Keep a fresh, real per-post dataset for SBA's official accounts, including a stats time series, so Tasks 1–4 run on real data instead of seed data.
+- **Input:** The account registry (`backend/sba_channels.py`: 9 verified SBA YouTube channels + SBA Instagram accounts) plus what is already stored in the database.
+- **Trigger:** In-process scheduler every 30 min (production), `POST /api/collector/run`, or the CLI `python -m backend.agents.data_collector_agent`.
+- **Available tools:**
+  - YouTube Data API v3: `channels.list`, `playlistItems.list`, `videos.list`, 1 quota unit each.
+  - Instagram Graph API Business Discovery: public profile and posts of business accounts, about 200 calls/hour.
+  - Gemini, for topic classification.
+- **Data/context:** Database tables `channels`, `videos`, `video_snapshots`, `collector_runs` (Postgres in production, SQLite locally).
+- **Reasoning task:** Spend a fixed quota budget where it matters most.
+- **Decision:**
+  - Which channels to page, and when discovery has caught up: 50 consecutive known uploads, or the lookback cutoff.
+  - Which videos are due a stats refresh, by age: under 2 days every 30 min, under 7 days every 2 h, under 30 days daily, older weekly.
+  - Which topics to refine with the LLM.
+- **Action/output:**
+  - Upserted channel and video rows.
+  - One `video_snapshots` row per refreshed video.
+  - A `collector_runs` row with status, counts and quota spent.
+- **Memory/state:** The database. Runs are incremental, and backfill progress is derived from what's stored.
+- **Evidence:** Every stored number is exactly what the API returned at `captured_at`. Hidden metrics stay `NULL`, never 0.
+- **Failure/fallback:**
+  - Transient errors are retried with backoff.
+  - Quota exhaustion ends the run as `partial`; the next run resumes.
+  - Only one run at a time.
+  - No Gemini key → topics stay rule-based.
+
+**Content type:** `short` (≤60s, or ≤180s tagged #shorts; the API has no Shorts flag), `video` or `live`.
+**Topics:** `news`, `sports`, `religious`, `national_event`, `economy`, `talk_show`, `documentary`, `entertainment`, `other`.
+**Analysis input for other agents:** `backend/repository.analysis_records()`. One record per video, with `views_index` (views ÷ the channel + content-type median), `engagement_rate`, and Riyadh-time `publish_hour` / `day_of_week`. Videos younger than 3 days are excluded.
+
+**Instagram:**
+- Stored in the same tables with `platform = "instagram"`.
+- Gives likes (`NULL` when hidden) and comments, but **no views, reach or shares** for accounts we don't own.
+- Reels map to `short`; `image` and `carousel` are extra content types.
+- Until an account is backfilled, runs page back to the cutoff. After that, each run re-reads only the last 7 days.
+- An expired token or a rate limit fails only the Instagram step: YouTube still runs, and the run is marked `partial`.
+
+**Cross-platform comparison:** `analysis_records()` exposes `performance_index`: views on YouTube, likes + comments on Instagram, each divided by its own account's median.
+
+**X / TikTok:** not collected. Their APIs need paid access (X) or a weeks-long approval (TikTok). They can plug into the same tables later; see [DATA_COLLECTION.md](DATA_COLLECTION.md) section 5.
+
+**Acceptance criteria (met):**
+- The first run backfills the full 60-day window for all 9 channels (2,901 videos, 131 quota units).
+- The next run is incremental (19 units).
+- Quota exhaustion and concurrent runs are handled.
+- The Instagram collector is tested against a simulated Graph API: backfill, incremental refresh, unknown account, expired token, rate limit.
+- 46 backend tests pass on both SQLite and Postgres.
 
 ---
 

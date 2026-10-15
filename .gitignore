@@ -12,3 +12,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 backend/store/pattern_store.json
+
+backend/store/*.db
+backend/store/*.db-journal
