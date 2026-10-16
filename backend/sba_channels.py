@@ -29,6 +29,7 @@ BY_ENTITY = {c["entity_key"]: c for c in SBA_CHANNELS}
 # the Meta app verifies each handle in the Graph API Explorer and adds the rest
 # (steps in DATA_COLLECTION.md). An unknown/non-business handle is skipped and
 # reported in the collector run's error field - it never breaks the run.
-SBA_INSTAGRAM_ACCOUNTS: list[dict[str, str]] = [
-    {"entity_key": "saudiya", "username": "saudiyatv"},
+SBA_INSTAGRAM_ACCOUNTS = [
+    {"entity_key": "sba", "username": "sbagovsa"},
 ]
+

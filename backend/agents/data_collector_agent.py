@@ -37,7 +37,7 @@ from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.engine import Engine
 
 from backend import config, db
-from backend.agents import instagram_collector, llm_client
+from backend.agents import instagram_collector, instagram_provider, llm_client
 from backend.agents.instagram_client import InstagramClient, InstagramRateLimited
 from backend.agents.youtube_client import QuotaExceeded, YouTubeClient, parse_duration
 from backend.sba_channels import SBA_CHANNELS
@@ -391,9 +391,7 @@ def run(
     if "instagram" not in platforms:
         instagram_client = None
     elif instagram_client is None and config.INSTAGRAM_ENABLED:
-        instagram_client = InstagramClient(
-            config.META_ACCESS_TOKEN, config.INSTAGRAM_BUSINESS_ACCOUNT_ID, config.META_GRAPH_API_VERSION
-        )
+        instagram_client = instagram_provider.make_client()
     if instagram_client is not None:
         sources_tried += 1
         try:

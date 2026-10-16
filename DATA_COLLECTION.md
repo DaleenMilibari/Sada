@@ -125,6 +125,48 @@ python -m backend.agents.data_collector_agent --platform instagram --llm-limit 0
 
 ---
 
+### 3.6 Alternative: Apify instead of Meta (optional)
+
+If the Meta setup is blocked, `INSTAGRAM_PROVIDER=apify` collects the same accounts through Apify's Instagram Scraper. It reads any public account (not only business/creator ones) and does not need a Facebook Page.
+
+**Trade-offs, decide as a team before using it:** it is a scraper, so it breaks Instagram's terms of use and can stop working when Instagram changes its pages. Apify bills per result (about $2.70 per 1,000 on the free plan). Meta's official API stays the default.
+
+1. Create an account at **[apify.com](https://apify.com)**, then **Settings → API & integrations** and copy your **personal API token**. Treat it like any other key (section 1) and send it only to the lead.
+2. Put this in `backend/.env`:
+   ```
+   INSTAGRAM_PROVIDER=apify
+   APIFY_API_TOKEN=your-token-here
+   ```
+3. Check one account first. This costs a few cents at most:
+   ```bash
+   python -m backend.agents.apify_instagram_client saudiyatv
+   ```
+4. Then collect: `python -m backend.agents.data_collector_agent --platform instagram --llm-limit 0`
+
+**Spend control.** Each account is fetched at most once per `APIFY_MIN_INTERVAL_MINUTES` (default 360), even though the collector runs every 30 minutes. The first fetch after a restart backfills `COLLECTOR_LOOKBACK_DAYS`, and later ones re-read `INSTAGRAM_REFRESH_DAYS`. Set a monthly spending limit in Apify Console as a safety net.
+
+Likes hidden by an account are stored as missing, never as 0. Views are available from Apify for Reels but are not stored yet.
+
+---
+
+### 3.7 Alternative: run Apify yourself and import the file
+
+No token in the project and no automatic collection: you run Apify's Instagram Scraper on its website, download the result, and load it.
+
+1. Add each account to `SBA_INSTAGRAM_ACCOUNTS` in `backend/sba_channels.py`. Posts from accounts not in that list are skipped.
+2. On [apify.com](https://apify.com), open **Instagram Scraper** (`apify/instagram-scraper`). Enter the profile URLs, set the result type to **Posts**, a results limit per profile, and "posts newer than" about 60 days. Run it.
+3. In the run's **Output** (or **Storage**) tab, export the dataset as **JSON**.
+4. Optional, for follower counts: run it again with result type **Details** and export that too.
+5. Import (the database is the one in `backend/.env`, SQLite by default):
+   ```bash
+   python -m backend.apify_import posts.json --profiles details.json
+   ```
+6. To share with the team, export the database as a seed file and send it to the lead: `python -m backend.db_tools export backend/data/<name>.json.gz`.
+
+This is a one-time snapshot, so there is no like and comment history over time for these posts until you import again. The legal and terms-of-use trade-offs in 3.6 apply here too.
+
+---
+
 ## 4. What Instagram data we get (and don't)
 
 | Field | Available | Notes |
