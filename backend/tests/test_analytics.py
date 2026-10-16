@@ -58,8 +58,8 @@ def test_summary_totals_and_null_handling(engine):
 
 
 def test_platform_filter_and_best_times_min_sample(engine):
-    for i in range(3):
-        add(engine, f"a{i}", age_days=10 + i * 7, hour_utc=10, views=1000 + i)  # same weekday + hour: 3 posts -> one cell
+    for i in range(analytics.MIN_TIMES_N):
+        add(engine, f"a{i}", age_days=10 + i * 7, hour_utc=10, views=1000 + i)  # same weekday + hour: one cell at the minimum size
     add(engine, "lonely", age_days=12, hour_utc=3)  # a cell of 1 post must not be surfaced
     s = analytics.build_summary(60, "youtube")
     assert all(t["platform"] == "youtube" for t in s["best_times"])

@@ -31,6 +31,9 @@ interface ApiPattern {
   slice_key: string;
   lift_pct: number;
   source: string;
+  sample_size?: number | null; // real-data patterns: posts in the slice
+  q_value?: number | null; // FDR-adjusted p-value
+  typical_ratio?: number | null;
 }
 
 const DIMENSION_META: Record<ApiPattern['dimension'], { label: string; icon: React.ReactNode; tagColor: string }> = {
@@ -92,7 +95,7 @@ const SOURCE_LABEL: Record<string, string> = {
   real_instagram_sba: 'إنستغرام الهيئة',
   real_x_sba: 'إكس الهيئة',
   real_sba: 'مقارنة بين المنصات',
-  real_hajj_1445_sba: 'إحصاءات حج ١٤٤٥هـ',
+  real_hajj_1445_sba: 'إحصاءات حج 1445هـ',
   real_awj_sada: 'أوج | صدى',
 };
 
@@ -179,6 +182,28 @@ function Segmented<T extends string | number>({
   );
 }
 
+// Turns a ratio-to-usual (1 = the account's typical post) into a sentence anyone can read.
+function vsUsual(ratio: number): { text: string; tone: 'up' | 'down' | 'flat' } {
+  if (ratio >= 1.95) return { text: `${ratio.toFixed(1)} ضعف المعتاد`, tone: 'up' };
+  const pct = Math.round(Math.abs(ratio - 1) * 100);
+  if (pct < 5) return { text: 'مثل المعتاد تقريباً', tone: 'flat' };
+  return ratio > 1 ? { text: `أعلى من المعتاد بـ ${pct}%`, tone: 'up' } : { text: `أقل من المعتاد بـ ${pct}%`, tone: 'down' };
+}
+const TONE_CLASS = { up: 'text-emerald-700', down: 'text-rose-600', flat: 'text-slate-500' } as const;
+const TONE_COLOR = { up: '#059669', down: '#e11d48', flat: '#94a3b8' } as const;
+
+// Plain wording for a pattern's false-discovery-adjusted p-value (q).
+function reliabilityLabel(q: number): string {
+  if (q < 0.001) return 'موثوقية عالية جداً';
+  if (q < 0.01) return 'موثوقية عالية';
+  return 'موثوقية جيدة';
+}
+function chanceLabel(q: number): string {
+  if (q < 0.001) return 'أقل من 1 في الألف';
+  if (q < 0.01) return 'أقل من 1%';
+  return `حوالي ${Math.max(1, Math.round(q * 100))}%`;
+}
+
 function IndexBars({ rows }: { rows: { label: string; value: number; sub: string; color?: string }[] }) {
   const max = Math.max(1.5, ...rows.map((r) => r.value));
   return (
@@ -187,12 +212,12 @@ function IndexBars({ rows }: { rows: { label: string; value: number; sub: string
         <div key={`${i}-${r.label}`}>
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-bold text-slate-800 font-arabic">{r.label}</span>
-            <span className="text-xs text-slate-500 font-arabic">
-              <strong className="text-slate-900">{r.value.toFixed(2)}×</strong> · {r.sub}
+            <span className="text-xs text-slate-500 font-arabic" title={`${r.value.toFixed(2)}× من المعتاد`}>
+              <strong className={TONE_CLASS[vsUsual(r.value).tone]}>{vsUsual(r.value).text}</strong> · {r.sub}
             </span>
           </div>
           <div className="relative h-2 bg-slate-100 rounded-full overflow-hidden">
-            <div className="h-full rounded-full transition-all duration-700" style={{ width: `${(r.value / max) * 100}%`, backgroundColor: r.color ?? '#059669' }} />
+            <div className="h-full rounded-full transition-all duration-700" style={{ width: `${(r.value / max) * 100}%`, backgroundColor: r.color ?? TONE_COLOR[vsUsual(r.value).tone] }} />
             <div className="absolute top-0 bottom-0 w-px bg-slate-500/50" style={{ right: `${100 - (1 / max) * 100}%` }} title="المعتاد (1×)" />
           </div>
         </div>
@@ -206,11 +231,21 @@ function Heatmap({ summary, platform }: { summary: AnalyticsSummary; platform: P
     summary.best_times.filter((c) => c.platform === platform).map((c) => [`${c.day_of_week}-${c.hour}`, c]),
   );
   if (cells.size === 0) {
-    return <p className="text-xs text-slate-400 font-arabic text-center py-10">لا توجد خلايا بعدد منشورات كافٍ (٣ على الأقل) لعرض أفضل الأوقات.</p>;
+    return <p className="text-xs text-slate-400 font-arabic text-center py-10">لا توجد أوقات بعدد منشورات كافٍ (5 على الأقل) للحكم عليها بعد.</p>;
   }
-  const best = [...cells.values()].sort((a, b) => b.median_performance_index - a.median_performance_index)[0];
+  const top = [...cells.values()].sort((a, b) => b.median_performance_index - a.median_performance_index).slice(0, 3);
+  const dayLabel = (key: string) => DAYS.find((d) => d.key === key)?.label;
   return (
     <div>
+      <div className="flex flex-wrap gap-2 mb-4">
+        {top.map((c, i) => (
+          <div key={`${c.day_of_week}-${c.hour}`} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-100">
+            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] font-black flex items-center justify-center">{i + 1}</span>
+            <span className="text-xs font-bold text-slate-800 font-arabic">{dayLabel(c.day_of_week)} الساعة {c.hour}:00</span>
+            <span className="text-[11px] text-emerald-700 font-arabic">{vsUsual(c.median_performance_index).text} · {c.n} منشوراً</span>
+          </div>
+        ))}
+      </div>
       <div className="overflow-x-auto">
         <table className="border-separate border-spacing-0.5 w-full min-w-[640px]" dir="ltr">
           <thead>
@@ -232,7 +267,7 @@ function Heatmap({ summary, platform }: { summary: AnalyticsSummary; platform: P
                       key={h}
                       className="h-5 rounded-sm text-center"
                       style={{ backgroundColor: c ? heatColor(c.median_performance_index) : '#f1f5f9' }}
-                      title={c ? `${d.label} ${h}:00 — ${c.median_performance_index.toFixed(2)}× المعتاد (n=${c.n})` : 'بيانات غير كافية'}
+                      title={c ? `${d.label} الساعة ${h}:00 — ${vsUsual(c.median_performance_index).text} (${c.n} منشوراً)` : 'منشورات قليلة في هذا الوقت - لا يمكن الحكم'}
                     />
                   );
                 })}
@@ -242,13 +277,11 @@ function Heatmap({ summary, platform }: { summary: AnalyticsSummary; platform: P
         </table>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-[11px] text-slate-500 font-arabic">
-        <span>
-          الأفضل: {DAYS.find((d) => d.key === best.day_of_week)?.label} {best.hour}:00 بتوقيت الرياض ({best.median_performance_index.toFixed(2)}× المعتاد، n={best.n})
-        </span>
+        <span>كل مربع = منشورات نُشرت في ذلك اليوم والساعة · مرّر الفأرة على أي مربع للتفاصيل</span>
         <span className="flex items-center gap-1.5">
           <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: heatColor(0.4) }} /> أقل من المعتاد
           <span className="w-3 h-3 rounded-sm mr-2" style={{ backgroundColor: heatColor(2) }} /> أعلى من المعتاد
-          <span className="w-3 h-3 rounded-sm bg-slate-100 mr-2" /> بيانات غير كافية
+          <span className="w-3 h-3 rounded-sm bg-slate-100 mr-2" /> منشورات قليلة (أقل من 5)
         </span>
       </div>
     </div>
@@ -336,12 +369,13 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
 
   const heatChoices = platform === 'all' ? PLATFORM_TABS.filter((t) => t.key !== 'all') : [];
   const empty = summary !== null && summary.totals.posts === 0;
-  const channelRows = summary?.by_channel.map((c) => ({
-    name: `${c.name_ar}${platform === 'all' ? ` (${PLATFORM_LABEL[c.platform]})` : ''}`,
-    index: c.median_performance_index,
-    platform: c.platform,
-    posts: c.posts,
-  })) ?? [];
+  // Accounts are compared on reach per 1,000 followers, within one platform (views and impressions differ).
+  const channelPlatform: Platform = platform === 'all' ? heatPlatform : platform;
+  const channelRows = (summary?.by_channel ?? [])
+    .filter((c) => c.platform === channelPlatform && c.median_per_1k_followers !== null)
+    .map((c) => ({ name: c.name_ar, index: c.median_per_1k_followers as number, platform: c.platform, posts: c.posts }))
+    .sort((a, b) => b.index - a.index);
+  const reachUnit = channelPlatform === 'youtube' ? 'مشاهدة' : channelPlatform === 'x' ? 'مرة ظهور' : 'تفاعل';
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -403,9 +437,18 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
             <div className={`lg:col-span-3 ${CARD}`}>
               <div className="flex items-center gap-2 mb-1">
                 <div className="p-1.5 bg-slate-100 rounded-lg text-slate-700"><BarChart2 className="w-4 h-4" /></div>
-                <h3 className="text-sm font-bold text-slate-900 font-arabic">مقارنة القنوات (مؤشر الأداء)</h3>
+                <h3 className="text-sm font-bold text-slate-900 font-arabic">أي الحسابات تصل لجمهورها أكثر؟</h3>
+                {platform === 'all' && <div className="mr-auto"><Segmented options={heatChoices as { key: Platform; label: string }[]} value={heatPlatform} onChange={setHeatPlatform} /></div>}
               </div>
-              <p className="text-[11px] text-slate-400 font-arabic mb-3">وسيط أداء المنشور مقسوماً على المعتاد لنفس الحساب ونوع المحتوى (1× = المعتاد)</p>
+              <p className="text-[11px] text-slate-400 font-arabic mb-1">
+                كم {reachUnit} يحققها المنشور المعتاد لكل 1000 متابع · يقارن الحسابات بعدل مهما كان حجمها
+              </p>
+              {channelRows.length > 1 && (
+                <p className="text-xs text-slate-700 font-arabic mb-3">
+                  الأعلى وصولاً: <strong>{channelRows[0].name}</strong> ({channelRows[0].index.toFixed(1)} {reachUnit} لكل 1000 متابع) · الأقل:{' '}
+                  <strong>{channelRows[channelRows.length - 1].name}</strong> ({channelRows[channelRows.length - 1].index.toFixed(1)})
+                </p>
+              )}
               {/* dir="ltr": in the RTL page the SVG tick text would run back over the bars and be clipped. */}
               <div dir="ltr" style={{ height: Math.max(220, channelRows.length * 34 + 40) }} className="w-full">
                 <ResponsiveContainer width="100%" height="100%">
@@ -415,9 +458,8 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
                     <YAxis type="category" dataKey="name" width={150} orientation="right" tick={{ fontSize: 11, fill: '#475569', fontFamily: 'Tajawal, sans-serif' }} axisLine={false} tickLine={false} />
                     <Tooltip
                       contentStyle={{ borderRadius: 16, fontFamily: 'Tajawal, sans-serif', direction: 'rtl', textAlign: 'right' }}
-                      formatter={(v: number) => [`${v.toFixed(2)}×`, 'وسيط مؤشر الأداء']}
+                      formatter={(v: number) => [`${v.toFixed(1)} ${reachUnit} لكل 1000 متابع`, 'المنشور المعتاد']}
                     />
-                    <ReferenceLine x={1} stroke="#64748b" strokeDasharray="4 4" />
                     <Bar dataKey="index" radius={[0, 6, 6, 0]}>
                       {channelRows.map((r) => <Cell key={r.name} fill={PLATFORM_COLOR[r.platform]} />)}
                     </Bar>
@@ -460,7 +502,7 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
                 <div className="p-1.5 bg-amber-50 rounded-lg text-amber-600"><Clock className="w-4 h-4" /></div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 font-arabic">أفضل أوقات النشر</h3>
-                  <p className="text-[11px] text-slate-400 font-arabic">اليوم × الساعة (بتوقيت الرياض) · وسيط مؤشر الأداء</p>
+                  <p className="text-[11px] text-slate-400 font-arabic">أي يوم وساعة (بتوقيت الرياض) تحقق فيهما المنشورات أفضل من المعتاد لنفس الحساب</p>
                 </div>
               </div>
               {heatChoices.length > 0 && <Segmented options={heatChoices as { key: Platform; label: string }[]} value={heatPlatform} onChange={setHeatPlatform} />}
@@ -471,11 +513,13 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
           {/* ── Topic & content type ── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className={CARD}>
-              <h3 className="text-sm font-bold text-slate-900 font-arabic mb-4">الأداء حسب الموضوع</h3>
+              <h3 className="text-sm font-bold text-slate-900 font-arabic">الأداء حسب الموضوع</h3>
+              <p className="text-[11px] text-slate-400 font-arabic mb-4">المنشور المعتاد في كل موضوع مقارنة بالمعتاد لنفس الحساب ونوع المحتوى</p>
               <IndexBars rows={summary.by_topic.map((t) => ({ label: t.label_ar, value: t.median_performance_index, sub: `${t.posts} منشور` }))} />
             </div>
             <div className={CARD}>
-              <h3 className="text-sm font-bold text-slate-900 font-arabic mb-4">الأداء حسب نوع المحتوى</h3>
+              <h3 className="text-sm font-bold text-slate-900 font-arabic">الأداء حسب نوع المحتوى</h3>
+              <p className="text-[11px] text-slate-400 font-arabic mb-4">المنشور المعتاد من كل نوع مقارنة بالمنشور المعتاد لنفس الحساب</p>
               <IndexBars
                 rows={summary.by_content_type.map((t) => ({
                   label: `${CONTENT_TYPE_LABEL[t.content_type] ?? t.content_type}${platform === 'all' ? ` · ${PLATFORM_LABEL[t.platform]}` : ''}`,
@@ -580,12 +624,33 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
                     <p className="text-xs text-slate-800 font-arabic leading-relaxed text-right font-medium">
                       {pattern.pattern}
                     </p>
-                    <p className="mt-1.5 text-[10px] text-slate-500 font-arabic leading-relaxed text-right">{pattern.supporting_metric}</p>
+                    {pattern.sample_size != null && pattern.q_value != null ? (
+                      <>
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          <span className="text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded-full font-arabic">
+                            مبني على {pattern.sample_size.toLocaleString('en')} منشوراً
+                          </span>
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-arabic">
+                            {reliabilityLabel(pattern.q_value)}
+                          </span>
+                        </div>
+                        <details className="mt-2 group">
+                          <summary className="text-[10px] text-slate-400 font-arabic cursor-pointer hover:text-slate-600">التفاصيل الإحصائية</summary>
+                          <p className="mt-1 text-[10px] text-slate-500 font-arabic leading-relaxed text-right">{pattern.supporting_metric}</p>
+                        </details>
+                      </>
+                    ) : (
+                      <p className="mt-1.5 text-[10px] text-slate-500 font-arabic leading-relaxed text-right">{pattern.supporting_metric}</p>
+                    )}
                   </div>
 
                   <div className="mt-4 pt-2.5 border-t border-slate-200/70 flex items-center justify-between">
                     <span className="text-[10px] text-slate-400 font-arabic">
-                      الثقة: <strong className="text-slate-700">{Math.round(pattern.confidence * 100)}%</strong>
+                      {pattern.q_value != null ? (
+                        <>احتمال أن يكون صدفة: <strong className="text-slate-700">{chanceLabel(pattern.q_value)}</strong></>
+                      ) : (
+                        <>الثقة: <strong className="text-slate-700">{Math.round(pattern.confidence * 100)}%</strong></>
+                      )}
                     </span>
 
                     <button

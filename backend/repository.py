@@ -147,6 +147,9 @@ def analysis_records(days: int = 60, min_age_days: float = 3.0, platform: str | 
       platform + account + content_type (1.0 = typical for that account; 2.0 = twice its usual).
       Primary metric: views on YouTube; impressions on X; likes + comments on Instagram (its API exposes no views).
       **Compare slices - including across platforms - on performance_index, never on raw counts.**
+    - `account_index`: the same ratio against the account's typical post of any content type -
+      use it to compare content types (performance_index can't: it is 1.0 at each type's median).
+    - `per_1k_followers`: primary metric per 1,000 followers, to compare accounts within a platform.
     - `views_index` is the same value for YouTube only (None on Instagram).
     - Post age: posts younger than `min_age_days` when their stats were last measured are excluded -
       they hadn't accumulated engagement yet (matters for X, whose posts are never re-read).
@@ -178,6 +181,7 @@ def analysis_records(days: int = 60, min_age_days: float = 3.0, platform: str | 
 
     records = []
     groups: dict[tuple[str, str, str], list[int]] = {}
+    account_groups: dict[tuple[str, str], list[int]] = {}
     for r in rows:
         r["primary_metric"] = {"youtube": "views", "x": "impressions"}.get(r["platform"], "interactions")
         r["primary_value"] = primary(r)
@@ -185,7 +189,9 @@ def analysis_records(days: int = 60, min_age_days: float = 3.0, platform: str | 
             continue  # nothing comparable was exposed for this post
         records.append(r)
         groups.setdefault((r["platform"], r["entity_key"], r["content_type"]), []).append(r["primary_value"])
+        account_groups.setdefault((r["platform"], r["entity_key"]), []).append(r["primary_value"])
     medians = {key: (statistics.median(vals) or 1) for key, vals in groups.items()}
+    account_medians = {key: (statistics.median(vals) or 1) for key, vals in account_groups.items()}
 
     for r in records:
         local = r["published_at"].astimezone(RIYADH_TZ)
@@ -193,6 +199,12 @@ def analysis_records(days: int = 60, min_age_days: float = 3.0, platform: str | 
         r["day_of_week"] = local.strftime("%a").lower()  # mon..sun
         r["age_days"] = round((now - r["published_at"]).total_seconds() / 86400, 2)
         r["performance_index"] = round(r["primary_value"] / medians[(r["platform"], r["entity_key"], r["content_type"])], 4)
+        # Same idea against the account's typical post of *any* type - the index to compare
+        # content types with (performance_index is 1.0 at every type's median by construction).
+        r["account_index"] = round(r["primary_value"] / account_medians[(r["platform"], r["entity_key"])], 4)
+        # Reach per 1,000 followers: compares accounts of different sizes within one platform.
+        followers = r.get("subscriber_count")
+        r["per_1k_followers"] = round(r["primary_value"] / followers * 1000, 4) if followers else None
         r["views_index"] = r["performance_index"] if r["platform"] == "youtube" else None
         interactions = [x for x in (r["like_count"], r["comment_count"]) if x is not None]
         r["engagement_rate"] = sum(interactions) / r["view_count"] if interactions and r["view_count"] else None

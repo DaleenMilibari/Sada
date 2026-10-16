@@ -101,6 +101,7 @@ export interface AnalyticsSummary {
     views: number | null;
     median_performance_index: number;
     engagement_rate: number | null;
+    median_per_1k_followers: number | null;
   }[];
   by_content_type: { platform: Platform; content_type: string; posts: number; median_performance_index: number }[];
   by_topic: { topic: string; label_ar: string; posts: number; median_performance_index: number }[];

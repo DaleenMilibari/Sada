@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import statistics
 from pathlib import Path
 from typing import Any
@@ -195,112 +196,173 @@ def analyze(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return patterns
 
 
+# --- Real SBA post statistics -------------------------------------------------
+#
+# Per-post performance ratios are heavy-tailed (a few viral posts sit at 50-200x
+# the account's typical value), so means and plain t-tests are dominated by
+# outliers. Real-data slices are therefore tested on log(index) with Welch's
+# t-test, the effect is reported as the ratio of medians (what the *typical*
+# post in the slice gets vs. the typical post outside it), and because one
+# refresh tests dozens of slices, p-values are corrected for multiple
+# comparisons (Benjamini-Hochberg, false discovery rate FDR_Q).
+FDR_Q = 0.05
+INDEX_FLOOR = 0.01  # log() guard for posts that got ~0 of the metric
+
+CONTENT_TYPE_AR = {
+    "video": "الفيديو", "short": "المقاطع القصيرة", "live": "البث المباشر",
+    "image": "الصور", "carousel": "الألبومات", "text": "المنشورات النصية",
+}
+TIMING_AR = {
+    "weekend": "نهاية الأسبوع",
+    "weekday_afternoon_14_17": "عصر أيام الأسبوع (2-5 م)",
+    "weekday_evening_18_23": "مساء أيام الأسبوع (6-11 م)",
+    "weekday_morning_6_13": "صباح أيام الأسبوع",
+}
+
+
+def _p_value(t_stat: float, a: list[float], b: list[float]) -> float:
+    """Two-sided p-value of Welch's t with Welch-Satterthwaite degrees of freedom."""
+    from scipy import stats
+
+    va, vb = statistics.variance(a) / len(a), statistics.variance(b) / len(b)
+    df = (va + vb) ** 2 / ((va**2) / (len(a) - 1) + (vb**2) / (len(b) - 1)) if va + vb else 1.0
+    return float(2 * stats.t.sf(abs(t_stat), df))
+
+
+def _bh_adjust(p_values: list[float]) -> list[float]:
+    """Benjamini-Hochberg adjusted p-values (q-values), same order as the input."""
+    m = len(p_values)
+    order = sorted(range(m), key=lambda i: p_values[i])
+    adjusted = [0.0] * m
+    running = 1.0
+    for rank in range(m, 0, -1):
+        i = order[rank - 1]
+        running = min(running, p_values[i] * m / rank)
+        adjusted[i] = running
+    return adjusted
+
+
+def _ratio_phrase(ratio: float) -> str:
+    if ratio >= 1.95:
+        return f"{ratio:.1f} أضعاف المعتاد" if ratio < 10 else f"{ratio:.0f} ضعفاً من المعتاد"
+    pct = abs(ratio - 1) * 100
+    return f"أداءً أعلى بـ {pct:.0f}%" if ratio > 1 else f"أداءً أقل بـ {pct:.0f}%"
+
+
+def _real_candidates(records, dimension, key_fn, index_key, describe_fn) -> list[dict[str, Any]]:
+    """Every slice with enough posts on both sides, with its effect and raw p-value (not yet filtered)."""
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for r in records:
+        buckets.setdefault(key_fn(r), []).append(r)
+
+    def value(r: dict[str, Any]) -> float:
+        return max(r.get(index_key, r["performance_index"]), INDEX_FLOOR)
+
+    out = []
+    for key, bucket in buckets.items():
+        rest = [r for r in records if key_fn(r) != key]
+        if len(bucket) < MIN_SAMPLES or len(rest) < MIN_SAMPLES:
+            continue  # not enough evidence for this slice (or its complement)
+        a = [math.log(value(r)) for r in bucket]
+        b = [math.log(value(r)) for r in rest]
+        if statistics.variance(a) == 0 and statistics.variance(b) == 0:
+            continue
+        t_stat = _welch_t_stat(a, b)
+        med_a, med_b = statistics.median(value(r) for r in bucket), statistics.median(value(r) for r in rest)
+        out.append({
+            "dimension": dimension, "key": key, "n": len(bucket), "n_rest": len(rest), "t": t_stat,
+            "p": _p_value(t_stat, a, b) if t_stat else 1.0, "ratio": med_a / med_b, "med_a": med_a, "med_b": med_b,
+            "types": sorted({r["content_type"] for r in bucket}), "describe": describe_fn,
+        })
+    return out
+
+
+def _finalize(candidates: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Keep slices that survive the FDR correction and are big enough to matter; build pattern dicts."""
+    if not candidates:
+        return []
+    q_values = _bh_adjust([c["p"] for _, c in candidates])
+    patterns = []
+    for (source, c), q in zip(candidates, q_values):
+        lift = c["ratio"] - 1
+        if q > FDR_Q or abs(lift) < MIN_LIFT:
+            continue
+        patterns.append({
+            "pattern_id": _pattern_id(c["dimension"], c["key"]),
+            "pattern": c["describe"](c["key"], c["ratio"]),
+            "supporting_metric": (
+                f"المنشور النموذجي هنا: {c['med_a']:.2f}× من المعتاد، مقابل {c['med_b']:.2f}× لبقية المنشورات "
+                f"(n={c['n']} مقابل {c['n_rest']}؛ Welch t={c['t']:.1f} على المقياس اللوغاريتمي؛ "
+                f"q={q:.2g} بعد تصحيح المقارنات المتعددة)"
+            ),
+            "confidence": round(min(0.99, 1 - q), 2),
+            "affected_content_types": c["types"],
+            "dimension": c["dimension"],
+            "slice_key": c["key"],
+            "lift_pct": round(lift * 100, 1),
+            "sample_size": c["n"],
+            "q_value": round(q, 6),
+            "typical_ratio": round(c["ratio"], 3),
+            "source": source,
+        })
+    return patterns
+
+
 def analyze_real_data(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Patterns from real SBA YouTube + Instagram posts.
+    """Patterns from real SBA posts (YouTube, Instagram, X).
 
-    `records` is the output of backend.repository.analysis_records(): one flat
-    dict per post, already restricted to posts old enough to have settled
-    engagement, with `performance_index` (the post's primary metric divided by
-    its own platform+channel+content_type median) as the comparable score -
-    no extra normalization needed here, unlike analyze()'s synthetic path.
-
-    Each platform is sliced separately (content type, timing, topic, and
-    channel|topic) and tagged with its own source, since YouTube and
-    Instagram posts aren't on the same scale even after indexing. A separate
-    pass compares content types *across* both platforms at once (e.g. "Reels
-    on Instagram vs. Shorts on YouTube"), tagged source="real_sba" since it
-    isn't about one platform. Reuses the same significance gates as analyze()
-    (MIN_SAMPLES / MIN_LIFT / MIN_T_STAT via _slice_pattern) so a channel or
-    topic with too few real posts never produces a pattern.
+    `records` is backend.repository.analysis_records() output. Two indices are used:
+    - `account_index` (post / its account's typical post, any content type) for content-type
+      comparisons - the per-content-type `performance_index` is 1.0 at every type's median
+      by construction, so it can't tell content types apart.
+    - `performance_index` (post / account+content-type typical) for timing, topic and
+      account-topic slices, so a slice isn't "good" just because it is mostly video.
+    Each platform is sliced separately; one cross-platform pass compares content types
+    across platforms. All candidate slices of one run share one FDR correction.
     """
     if not records:
         return []
-
-    def score_fn(r: dict[str, Any]) -> float:
-        return r["performance_index"]
-
-    def _tag_source(patterns: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
-        for p in patterns:
-            p["source"] = source
-        return patterns
-
-    all_patterns: list[dict[str, Any]] = []
+    candidates: list[tuple[str, dict[str, Any]]] = []
 
     for platform in ("youtube", "instagram", "x"):
-        platform_records = [r for r in records if r["platform"] == platform]
-        if not platform_records:
+        rows = [r for r in records if r["platform"] == platform]
+        if not rows:
             continue
-        platform_ar = PLATFORM_LABELS_AR.get(platform, platform)
+        on = f"على {PLATFORM_LABELS_AR.get(platform, platform)}"
+        names = {r["entity_key"]: r["channel_name_ar"] for r in rows}
         source = f"real_{platform}_sba"
-        channel_names = {r["entity_key"]: r["channel_name_ar"] for r in platform_records}
-
-        content_patterns = _slice_pattern(
-            platform_records,
-            "content_type_real",
-            key_fn=lambda r: r["content_type"],
-            describe_fn=lambda key, lift, direction, platform_ar=platform_ar: (
-                f"محتوى {key} على {platform_ar} يحقق مؤشر أداء {direction} بنسبة {abs(lift) * 100:.0f}% "
-                f"عن بقية أنواع المحتوى على المنصة نفسها."
-            ),
-            score_fn=score_fn,
+        found = _real_candidates(
+            rows, "content_type_real", lambda r: r["content_type"], "account_index",
+            lambda k, ratio, on=on: f"{CONTENT_TYPE_AR.get(k, k)} {on}: المنشور النموذجي يحقق {_ratio_phrase(ratio)} مقارنة ببقية أنواع المحتوى في نفس الحسابات.",
         )
-        all_patterns += _tag_source(content_patterns, source)
-
-        timing_patterns = _slice_pattern(
-            platform_records,
-            "timing_real",
-            key_fn=lambda r: hour_bucket(r["day_of_week"], r["publish_hour"]),
-            describe_fn=lambda key, lift, direction, platform_ar=platform_ar: (
-                f"النشر في الفترة ({key}) على {platform_ar} يرتبط بمؤشر أداء {direction} بنسبة "
-                f"{abs(lift) * 100:.0f}% عن بقية الأوقات على المنصة نفسها."
-            ),
-            score_fn=score_fn,
+        found += _real_candidates(
+            rows, "timing_real", lambda r: hour_bucket(r["day_of_week"], r["publish_hour"]), "performance_index",
+            lambda k, ratio, on=on: f"النشر في {TIMING_AR.get(k, k)} {on}: المنشور النموذجي يحقق {_ratio_phrase(ratio)} مقارنة ببقية الأوقات.",
         )
-        all_patterns += _tag_source(timing_patterns, source)
-
-        topic_patterns = _slice_pattern(
-            platform_records,
-            "topic_real",
-            key_fn=lambda r: r["topic"],
-            describe_fn=lambda key, lift, direction, platform_ar=platform_ar: (
-                f"موضوع '{TOPICS.get(key, key)}' على {platform_ar} يحقق مؤشر أداء {direction} بنسبة "
-                f"{abs(lift) * 100:.0f}% عن بقية الموضوعات على المنصة نفسها."
-            ),
-            score_fn=score_fn,
+        found += _real_candidates(
+            rows, "topic_real", lambda r: r["topic"], "performance_index",
+            lambda k, ratio, on=on: f"موضوع «{TOPICS.get(k, k)}» {on}: المنشور النموذجي يحقق {_ratio_phrase(ratio)} مقارنة ببقية الموضوعات.",
         )
-        all_patterns += _tag_source(topic_patterns, source)
-
-        channel_topic_patterns = _slice_pattern(
-            platform_records,
-            "channel_topic_real",
-            key_fn=lambda r: f"{r['entity_key']}|{r['topic']}",
-            describe_fn=lambda key, lift, direction, platform_ar=platform_ar, channel_names=channel_names: (
-                f"حساب {channel_names.get(key.split('|')[0], key.split('|')[0])} على {platform_ar} يحقق مؤشر "
-                f"أداء {direction} بنسبة {abs(lift) * 100:.0f}% في موضوع '{TOPICS.get(key.split('|')[1], key.split('|')[1])}' "
-                f"مقارنة ببقية محتواه."
+        found += _real_candidates(
+            rows, "channel_topic_real", lambda r: f"{r['entity_key']}|{r['topic']}", "performance_index",
+            lambda k, ratio, on=on, names=names: (
+                f"{names.get(k.split('|')[0], k.split('|')[0])} {on}، موضوع «{TOPICS.get(k.split('|')[1], k.split('|')[1])}»: "
+                f"المنشور النموذجي يحقق {_ratio_phrase(ratio)} مقارنة ببقية محتوى الحساب."
             ),
-            score_fn=score_fn,
         )
-        all_patterns += _tag_source(channel_topic_patterns, source)
+        candidates += [(source, c) for c in found]
 
-    # Cross-platform: does this content type on this platform beat the pooled
-    # cross-platform baseline for content type (e.g. Reels on Instagram vs.
-    # Shorts on YouTube)? Needs both platforms present to mean anything.
-    platforms_seen = {r["platform"] for r in records}
-    if len(platforms_seen) >= 2:
-        cross_patterns = _slice_pattern(
-            records,
-            "platform_content_real",
-            key_fn=lambda r: f"{r['platform']}|{r['content_type']}",
-            describe_fn=lambda key, lift, direction: (
-                f"محتوى {key.split('|')[1]} على {PLATFORM_LABELS_AR.get(key.split('|')[0], key.split('|')[0])} "
-                f"يحقق مؤشر أداء {direction} بنسبة {abs(lift) * 100:.0f}% عن بقية أنواع المحتوى عبر كل المنصات."
+    if len({r["platform"] for r in records}) >= 2:
+        cross = _real_candidates(
+            records, "platform_content_real", lambda r: f"{r['platform']}|{r['content_type']}", "account_index",
+            lambda k, ratio: (
+                f"{CONTENT_TYPE_AR.get(k.split('|')[1], k.split('|')[1])} على {PLATFORM_LABELS_AR.get(k.split('|')[0], k.split('|')[0])}: "
+                f"المنشور النموذجي يحقق {_ratio_phrase(ratio)} مقارنة ببقية المحتوى عبر كل المنصات."
             ),
-            score_fn=score_fn,
         )
-        all_patterns += _tag_source(cross_patterns, "real_sba")
+        candidates += [("real_sba", c) for c in cross]
 
-    return all_patterns
+    return _finalize(candidates)
 
 
 def _load_real_hajj_totals(path: Path = REAL_DATA_PATH) -> dict[str, Any] | None:

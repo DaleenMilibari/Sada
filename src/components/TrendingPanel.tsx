@@ -118,13 +118,14 @@ export default function TrendingPanel({ hours = 24, limit = 10 }: TrendingPanelP
                     <TrendingUp className="w-3 h-3" />
                     {compact.format(item.views_per_hour)} مشاهدة/ساعة
                   </span>
-                  <span>{item.velocity_index.toFixed(1)}× المعتاد</span>
+                  <span>أسرع من المعتاد بـ {item.velocity_index.toFixed(1)} مرة</span>
                   {item.predicted_views_7d !== null && (
                     <span>متوقع خلال 7 أيام: {compact.format(item.predicted_views_7d)}</span>
                   )}
                 </div>
 
                 <div className="flex items-center gap-2 mt-2" title={item.reason}>
+                  <span className="text-[10px] text-slate-400 font-arabic whitespace-nowrap">احتمالية الانتشار</span>
                   <div className="h-1.5 flex-1 bg-slate-100 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full ${scoreColor(item.viral_score)}`}

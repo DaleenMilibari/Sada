@@ -20,7 +20,7 @@ from backend.topics import TOPICS
 
 CACHE_TTL_SECONDS = 60
 MIN_POST_AGE_DAYS = 3.0  # analysis_records' default: younger posts haven't accumulated engagement
-MIN_TIMES_N = 3  # a (day, hour) cell with fewer posts is noise - it is not surfaced
+MIN_TIMES_N = 5  # a (day, hour) cell with fewer posts is noise - it is not surfaced
 
 _cache: dict[tuple[int, str | None], tuple[float, dict[str, Any]]] = {}
 _lock = threading.Lock()
@@ -105,14 +105,17 @@ def build_summary(days: int = 30, platform: str | None = None) -> dict[str, Any]
             "views": _sum(r["view_count"] for r in rows) if p in VIEW_PLATFORMS else None,
             "median_performance_index": _median([r["performance_index"] for r in rows]),
             "engagement_rate": _engagement_rate(rows, p),
+            # The typical post's views (YouTube) / impressions (X) / interactions (Instagram)
+            # per 1,000 followers - comparable across accounts of one platform, unlike the index.
+            "median_per_1k_followers": _median(per) if (per := [r["per_1k_followers"] for r in rows if r["per_1k_followers"] is not None]) else None,
         })
-    by_channel.sort(key=lambda c: c["median_performance_index"], reverse=True)
+    by_channel.sort(key=lambda c: c["median_per_1k_followers"] or 0, reverse=True)
 
     types: dict[tuple[str, str], list[float]] = {}
     topics: dict[str, list[float]] = {}
     cells: dict[tuple[str, str, int], list[float]] = {}
     for r in records:
-        types.setdefault((r["platform"], r["content_type"]), []).append(r["performance_index"])
+        types.setdefault((r["platform"], r["content_type"]), []).append(r["account_index"])  # vs the account's typical post
         topics.setdefault(r["topic"], []).append(r["performance_index"])
         cells.setdefault((r["platform"], r["day_of_week"], r["publish_hour"]), []).append(r["performance_index"])
 

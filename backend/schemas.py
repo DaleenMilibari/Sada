@@ -45,6 +45,11 @@ class Pattern(BaseModel):
     slice_key: str
     lift_pct: float
     source: str = "synthetic_seed_engagement_records"
+    # Real-data patterns only (analyze_real_data): posts in the slice, FDR-adjusted p-value,
+    # and the slice's typical post / the rest's typical post.
+    sample_size: int | None = None
+    q_value: float | None = None
+    typical_ratio: float | None = None
 
 
 class EngagementRecord(BaseModel):
@@ -348,12 +353,15 @@ class ChannelStats(BaseModel):
     views: int | None = None  # YouTube views, X impressions, null on Instagram
     median_performance_index: float
     engagement_rate: float | None = None  # null on Instagram (no views); per impression on X
+    # Typical post's views/impressions (interactions on Instagram) per 1,000 followers - compare within a platform.
+    median_per_1k_followers: float | None = None
 
 
 class ContentTypeStats(BaseModel):
     platform: Literal["youtube", "instagram", "x"]
     content_type: str
     posts: int
+    # Median of account_index: the typical post of this type vs the account's typical post of any type.
     median_performance_index: float
 
 

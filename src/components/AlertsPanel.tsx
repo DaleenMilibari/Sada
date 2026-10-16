@@ -108,12 +108,16 @@ export default function AlertsPanel({ compact: isCompact = false, days = isCompa
                   </p>
                   {!isCompact && <p className="text-[11px] text-slate-600 font-arabic mt-1 leading-relaxed">{a.explanation}</p>}
                 </div>
-                <div className="shrink-0 text-left">
-                  <p className={`text-sm font-black ${spike ? 'text-emerald-700' : 'text-rose-700'}`}>{a.ratio.toFixed(a.ratio >= 10 ? 0 : 1)}×</p>
-                  <p className="text-[10px] text-slate-400 font-arabic">
-                    {compact.format(a.observed)} / {compact.format(a.expected)}
+                <div className="shrink-0 text-left w-28">
+                  <p className={`text-xs font-black font-arabic ${spike ? 'text-emerald-700' : 'text-rose-700'}`}>
+                    {spike
+                      ? `${a.ratio >= 10 ? Math.round(a.ratio) : a.ratio.toFixed(1)} ضعف المعتاد`
+                      : `أقل من المعتاد بـ ${Math.round((1 - a.ratio) * 100)}%`}
                   </p>
-                  {a.severity === 'high' && <p className="text-[10px] font-bold text-amber-700 font-arabic">عالية</p>}
+                  <p className="text-[10px] text-slate-400 font-arabic" title="القيمة الفعلية مقابل المعتاد لنفس الحساب ونوع المحتوى">
+                    {compact.format(a.observed)} مقابل {compact.format(a.expected)} معتاد
+                  </p>
+                  {a.severity === 'high' && <p className="text-[10px] font-bold text-amber-700 font-arabic">أولوية عالية</p>}
                 </div>
               </>
             );
