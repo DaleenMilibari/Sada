@@ -172,8 +172,8 @@ function IndexBars({ rows }: { rows: { label: string; value: number; sub: string
   const max = Math.max(1.5, ...rows.map((r) => r.value));
   return (
     <div className="space-y-3">
-      {rows.map((r) => (
-        <div key={r.label}>
+      {rows.map((r, i) => (
+        <div key={`${i}-${r.label}`}>
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-bold text-slate-800 font-arabic">{r.label}</span>
             <span className="text-xs text-slate-500 font-arabic">
@@ -395,7 +395,8 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
                 <h3 className="text-sm font-bold text-slate-900 font-arabic">مقارنة القنوات (مؤشر الأداء)</h3>
               </div>
               <p className="text-[11px] text-slate-400 font-arabic mb-3">وسيط أداء المنشور مقسوماً على المعتاد لنفس الحساب ونوع المحتوى (1× = المعتاد)</p>
-              <div style={{ height: Math.max(220, channelRows.length * 34 + 40) }} className="w-full">
+              {/* dir="ltr": in the RTL page the SVG tick text would run back over the bars and be clipped. */}
+              <div dir="ltr" style={{ height: Math.max(220, channelRows.length * 34 + 40) }} className="w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={channelRows} layout="vertical" margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
