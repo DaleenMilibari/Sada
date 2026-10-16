@@ -33,8 +33,14 @@ class Pattern(BaseModel):
     # Both are descriptive-only - Tasks 2/3 never match against them since
     # drafts/items don't carry the attributes these dimensions describe,
     # they just ride along in the same store.
+    # "content_type_real" / "timing_real" / "topic_real" / "channel_topic_real" /
+    # "platform_content_real" come from real SBA YouTube + Instagram posts
+    # (backend.repository.analysis_records(), see analyze_real_data) scored on
+    # performance_index - the per-post-record counterpart to the dimensions
+    # above, usable by the optimizer the same way the synthetic ones are.
     dimension: Literal[
-        "content_type", "timing", "topic_platform", "platform_reach_real", "awj_sada_real"
+        "content_type", "timing", "topic_platform", "platform_reach_real", "awj_sada_real",
+        "content_type_real", "timing_real", "topic_real", "channel_topic_real", "platform_content_real",
     ]
     slice_key: str
     lift_pct: float
@@ -71,6 +77,10 @@ class DraftContent(BaseModel):
     # Optional writing tone (e.g. "تفاعلي" / "رسمي" / "إخباري") passed to the
     # LLM variant-generation prompt; ignored when `variants` is supplied.
     tone: str | None = Field(default=None, max_length=40)
+    # team.md Task 1 "on real data": optional SBA account entity_keys (see
+    # backend/sba_channels.py, GET /api/channels) to recommend a specific
+    # account from, additive only - when omitted, behavior is unchanged.
+    channel_options: list[str] = Field(default_factory=list)
 
 
 class RankedAlternative(BaseModel):
@@ -79,6 +89,8 @@ class RankedAlternative(BaseModel):
     time_window: str
     predicted_engagement: float
     evidence: list[str]
+    # Set only when the draft supplied channel_options.
+    channel: str | None = None
 
 
 class OptimizerEvidence(BaseModel):
@@ -95,6 +107,8 @@ class OptimizationResult(BaseModel):
     ranked_alternatives: list[RankedAlternative]
     evidence: list[OptimizerEvidence]
     low_confidence: bool = False
+    # Set only when the draft supplied channel_options (team.md Task 1 "on real data").
+    recommended_channel: str | None = None
 
 
 # ---------------------------------------------------------------------------

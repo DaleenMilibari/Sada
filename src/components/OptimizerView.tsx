@@ -13,6 +13,7 @@ interface OptimizerViewProps {
 interface RankedAlternative {
   variant: string;
   platform: string;
+  channel: string | null;
   time_window: string;
   predicted_engagement: number;
   evidence: string[];
@@ -28,10 +29,21 @@ interface OptimizationResult {
   recommended_variant: string;
   predicted_engagement: number;
   recommended_platform: string;
+  recommended_channel: string | null;
   recommended_time: string;
   ranked_alternatives: RankedAlternative[];
   evidence: OptimizerEvidence[];
   low_confidence: boolean;
+}
+
+// Mirrors backend/schemas.py::ChannelOut.
+interface ChannelOut {
+  channel_id: string;
+  platform: 'youtube' | 'instagram';
+  entity_key: string;
+  handle: string;
+  name_ar: string;
+  tracked_videos: number;
 }
 
 // Scores are relative to the optimizer's BASELINE_SCORE (content_optimizer_agent.py).
@@ -52,30 +64,35 @@ const TEMPLATES = [
   },
 ];
 
-// Values must match the platform / content_type / topic keys in backend/data/engagement_records.json.
-const PLATFORMS = [
-  { id: 'x', label: 'إكس' },
-  { id: 'instagram', label: 'إنستغرام' },
-  { id: 'youtube', label: 'يوتيوب' },
-  { id: 'snapchat', label: 'سناب شات' },
-] as const;
-type PlatformId = (typeof PLATFORMS)[number]['id'];
-
-const PLATFORM_LABELS: Record<string, string> = Object.fromEntries(PLATFORMS.map((p) => [p.id, p.label]));
+// Display labels for the platform/entity_key a channel belongs to. SBA
+// accounts are only collected on youtube/instagram (backend/sba_channels.py);
+// x/snapchat have no real data behind them, so they're no longer offered here.
+const PLATFORM_LABELS: Record<string, string> = {
+  youtube: 'يوتيوب',
+  instagram: 'إنستغرام',
+  x: 'إكس',
+  snapchat: 'سناب شات',
+};
 
 const CONTENT_TYPES = [
   { id: 'video', label: 'فيديو' },
+  { id: 'short', label: 'قصير (Shorts/Reels)' },
   { id: 'image', label: 'صورة' },
-  { id: 'text', label: 'نص' },
+  { id: 'carousel', label: 'منشور متعدد' },
 ];
 
+// Matches backend/topics.py::TOPICS exactly - the real topic taxonomy the
+// Data Collector agent classifies every SBA post into.
 const TOPICS = [
-  { id: 'national_event', label: 'حدث وطني' },
-  { id: 'housing_support', label: 'الدعم السكني' },
-  { id: 'economy', label: 'اقتصاد' },
+  { id: 'news', label: 'أخبار' },
   { id: 'sports', label: 'رياضة' },
-  { id: 'science', label: 'علوم' },
-  { id: 'general', label: 'عام' },
+  { id: 'religious', label: 'ديني' },
+  { id: 'national_event', label: 'مناسبات وطنية' },
+  { id: 'economy', label: 'اقتصاد' },
+  { id: 'talk_show', label: 'برامج حوارية' },
+  { id: 'documentary', label: 'وثائقي وثقافة' },
+  { id: 'entertainment', label: 'ترفيه ودراما' },
+  { id: 'other', label: 'أخرى' },
 ];
 
 const TONES = ['تفاعلي', 'رسمي', 'إخباري'] as const;
@@ -92,7 +109,9 @@ function formatLift(score: number): string {
 }
 
 export default function OptimizerView({ onNotify }: OptimizerViewProps) {
-  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformId[]>(['x', 'instagram']);
+  const [channels, setChannels] = useState<ChannelOut[]>([]);
+  const [channelsLoading, setChannelsLoading] = useState(true);
+  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
   const [content, setContent] = useState(TEMPLATES[0].text);
   const [tone, setTone] = useState<(typeof TONES)[number]>('تفاعلي');
   const [contentType, setContentType] = useState('video');
@@ -108,18 +127,50 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
     if (stepTimer.current) clearInterval(stepTimer.current);
   }, []);
 
-  const togglePlatform = (p: PlatformId) => {
-    setSelectedPlatforms((prev) =>
-      prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await apiFetch<ChannelOut[]>('/api/channels');
+        if (cancelled) return;
+        setChannels(list);
+        // Pre-select everything so a first-time user sees results immediately.
+        setSelectedChannels(list.map((c) => c.entity_key));
+      } catch (err) {
+        if (!cancelled) {
+          const { title, desc } = describeError(err);
+          onNotify?.(title, desc, 'info');
+        }
+      } finally {
+        if (!cancelled) setChannelsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const channelsByPlatform = {
+    youtube: channels.filter((c) => c.platform === 'youtube'),
+    instagram: channels.filter((c) => c.platform === 'instagram'),
+  };
+
+  const toggleChannel = (entityKey: string) => {
+    setSelectedChannels((prev) =>
+      prev.includes(entityKey) ? prev.filter((x) => x !== entityKey) : [...prev, entityKey]
     );
   };
 
   const handleOptimize = async () => {
-    if (isLoading || !content.trim() || selectedPlatforms.length === 0) return;
+    if (isLoading || !content.trim() || selectedChannels.length === 0) return;
     setIsLoading(true);
     setLoadingStep(1);
     // Steps advance while the request is in flight; the last one completes when the response lands.
     stepTimer.current = setInterval(() => setLoadingStep((s) => Math.min(s + 1, LOADING_STEPS.length)), 1500);
+
+    const selectedChannelSet = channels.filter((c) => selectedChannels.includes(c.entity_key));
+    const platformOptions = Array.from(new Set(selectedChannelSet.map((c) => c.platform)));
 
     try {
       const res = await apiFetch<OptimizationResult>('/api/optimize', {
@@ -127,16 +178,21 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
         body: JSON.stringify({
           content_type: contentType,
           topic,
-          platform_options: selectedPlatforms,
+          platform_options: platformOptions,
+          channel_options: selectedChannels,
           original_text: content.trim(),
           tone,
         }),
       });
       setResult(res);
       setSubmittedText(content.trim());
+      const winnerLabel =
+        channels.find((c) => c.entity_key === res.recommended_channel)?.name_ar ??
+        PLATFORM_LABELS[res.recommended_platform] ??
+        res.recommended_platform;
       onNotify?.(
         'اكتمل توليد المتغيرات',
-        `النسخة الفائزة على ${PLATFORM_LABELS[res.recommended_platform] ?? res.recommended_platform} (${formatLift(res.predicted_engagement)} تفاعل متوقع)`,
+        `النسخة الفائزة على ${winnerLabel} (${formatLift(res.predicted_engagement)} تفاعل متوقع)`,
         'success'
       );
     } catch (err) {
@@ -157,6 +213,9 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
     onNotify?.('تم نسخ النص إلى الحافظة', '', 'info');
     setTimeout(() => setCopiedVariant(null), 2000);
   };
+
+  const channelName = (entityKey: string | null) =>
+    entityKey ? channels.find((c) => c.entity_key === entityKey)?.name_ar ?? entityKey : null;
 
   // ranked_alternatives covers every variant × platform × time combo - show each
   // distinct variant other than the winner once, at its best-scoring combo.
@@ -194,30 +253,50 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
             </div>
           </div>
 
-          {/* Platform Selector */}
+          {/* SBA Account Selector (GET /api/channels, grouped by platform) */}
           <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs">
             <label className="block text-xs font-bold text-slate-500 font-arabic mb-2.5">
-              المنصات المستهدفة
+              الحسابات المستهدفة
             </label>
-            <div className="grid grid-cols-2 gap-2">
-              {PLATFORMS.map((p) => {
-                const isSelected = selectedPlatforms.includes(p.id);
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => togglePlatform(p.id)}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer font-arabic flex items-center justify-center gap-1.5 ${
-                      isSelected
-                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
-                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-white'
-                    }`}
-                  >
-                    {isSelected && <Check className="w-3.5 h-3.5" />}
-                    <span>{p.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+            {channelsLoading ? (
+              <div className="flex items-center gap-2 text-xs text-slate-400 font-arabic py-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>جارٍ تحميل الحسابات...</span>
+              </div>
+            ) : channels.length === 0 ? (
+              <p className="text-xs text-slate-400 font-arabic">لا توجد حسابات متاحة حالياً.</p>
+            ) : (
+              <div className="space-y-3">
+                {(['youtube', 'instagram'] as const).map((platform) =>
+                  channelsByPlatform[platform].length === 0 ? null : (
+                    <div key={platform}>
+                      <p className="text-[11px] font-bold text-slate-400 font-arabic mb-1.5">
+                        {PLATFORM_LABELS[platform]}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {channelsByPlatform[platform].map((c) => {
+                          const isSelected = selectedChannels.includes(c.entity_key);
+                          return (
+                            <button
+                              key={c.entity_key}
+                              onClick={() => toggleChannel(c.entity_key)}
+                              className={`py-1.5 px-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer font-arabic flex items-center gap-1 ${
+                                isSelected
+                                  ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
+                                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-white'
+                              }`}
+                            >
+                              {isSelected && <Check className="w-3 h-3" />}
+                              <span>{c.name_ar}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            )}
           </div>
 
           {/* Tone & Classification */}
@@ -308,7 +387,7 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
           {/* CTA Button */}
           <button
             onClick={handleOptimize}
-            disabled={isLoading || !content.trim() || selectedPlatforms.length === 0}
+            disabled={isLoading || !content.trim() || selectedChannels.length === 0}
             className="w-full flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white font-bold text-base py-3.5 rounded-2xl shadow-sm transition-all active:scale-[0.99] cursor-pointer disabled:cursor-not-allowed font-arabic"
           >
             {isLoading ? (
@@ -323,8 +402,8 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
               </>
             )}
           </button>
-          {selectedPlatforms.length === 0 && (
-            <p className="text-[11px] text-amber-600 font-arabic text-center">اختر منصة واحدة على الأقل</p>
+          {selectedChannels.length === 0 && (
+            <p className="text-[11px] text-amber-600 font-arabic text-center">اختر حساباً واحداً على الأقل</p>
           )}
         </div>
 
@@ -401,7 +480,7 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
 
                 <span className="flex items-center gap-1 text-xs font-semibold text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full font-arabic">
                   <Radio className="w-3 h-3" />
-                  {PLATFORM_LABELS[result.recommended_platform] ?? result.recommended_platform}
+                  {channelName(result.recommended_channel) ?? PLATFORM_LABELS[result.recommended_platform] ?? result.recommended_platform}
                 </span>
               </div>
 
@@ -488,7 +567,7 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
                         {formatLift(alt.predicted_engagement)} تفاعل متوقع
                       </span>
                       <span className="text-[11px] text-slate-400 font-arabic">
-                        {PLATFORM_LABELS[alt.platform] ?? alt.platform} · {alt.time_window}
+                        {channelName(alt.channel) ?? PLATFORM_LABELS[alt.platform] ?? alt.platform} · {alt.time_window}
                       </span>
                     </div>
                     <button

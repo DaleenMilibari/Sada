@@ -150,6 +150,133 @@ def test_real_awj_sada_data_produces_descriptive_patterns():
     assert "podcast_youtube_views:رهان" in slice_keys
 
 
+def _real_record(
+    platform: str,
+    entity_key: str,
+    channel_name_ar: str,
+    content_type: str,
+    topic: str,
+    performance_index: float,
+    day_of_week: str = "mon",
+    publish_hour: int = 10,
+) -> dict:
+    """A minimal backend.repository.analysis_records()-shaped record.
+
+    Only the fields analyze_real_data() actually reads - it's a pure function
+    over this shape, so tests build it directly instead of needing a seeded
+    database (that's exercised separately in test_data_collector.py).
+    """
+    return {
+        "platform": platform,
+        "entity_key": entity_key,
+        "channel_name_ar": channel_name_ar,
+        "content_type": content_type,
+        "topic": topic,
+        "performance_index": performance_index,
+        "day_of_week": day_of_week,
+        "publish_hour": publish_hour,
+    }
+
+
+def _real_records_for_slice(n: int, **overrides) -> list[dict]:
+    base = dict(
+        platform="youtube",
+        entity_key="riyadiya_tv",
+        channel_name_ar="قناة الرياضية",
+        content_type="video",
+        topic="sports",
+        performance_index=1.0,
+        day_of_week="mon",
+        publish_hour=10,
+    )
+    base.update(overrides)
+    pi = base.pop("performance_index")
+    records = []
+    for i in range(n):
+        # Small deterministic jitter so each bucket has real variance (needed
+        # for the Welch t-test) without materially changing the lift between
+        # buckets - a perfectly constant value makes variance 0 and the
+        # t-stat undefined, which _slice_pattern correctly treats as noise.
+        jittered = pi * (1 + ((i % 5) - 2) * 0.03)
+        records.append(_real_record(performance_index=jittered, **base))
+    return records
+
+
+def test_analyze_real_data_finds_real_content_type_and_topic_patterns():
+    # "short" content clearly outperforms its own channel/type baseline (perf_index ~2.5),
+    # "video" content on the same channel is roughly typical (perf_index ~1.0).
+    records = (
+        _real_records_for_slice(30, content_type="short", topic="sports", performance_index=2.5)
+        + _real_records_for_slice(30, content_type="video", topic="news", performance_index=1.0)
+    )
+
+    patterns = agent.analyze_real_data(records)
+    assert len(patterns) >= 1
+    for p in patterns:
+        assert p["source"] == "real_youtube_sba"
+        assert p["dimension"] in {"content_type_real", "timing_real", "topic_real", "channel_topic_real"}
+
+    dimensions = {p["dimension"] for p in patterns}
+    assert "content_type_real" in dimensions
+    assert "topic_real" in dimensions
+    assert "channel_topic_real" in dimensions
+
+    slice_keys = {p["slice_key"] for p in patterns}
+    assert "short" in slice_keys
+    assert "sports" in slice_keys
+    assert "riyadiya_tv|sports" in slice_keys
+
+
+def test_analyze_real_data_respects_min_samples():
+    # Only 3 records for this channel/topic combo - must never surface a pattern for it,
+    # same MIN_SAMPLES gate _slice_pattern already enforces for the synthetic path.
+    records = _real_records_for_slice(30, content_type="video", performance_index=1.0) + _real_records_for_slice(
+        3, entity_key="rare_channel", channel_name_ar="قناة نادرة", topic="economy", performance_index=5.0
+    )
+
+    patterns = agent.analyze_real_data(records)
+    assert not any("rare_channel" in p["slice_key"] for p in patterns)
+    assert not any(p["slice_key"] == "economy" for p in patterns)
+
+
+def test_analyze_real_data_empty_records_returns_no_patterns():
+    assert agent.analyze_real_data([]) == []
+
+
+def test_analyze_real_data_cross_platform_dimension_needs_both_platforms():
+    youtube_only = _real_records_for_slice(30, content_type="short", performance_index=2.0)
+    patterns = agent.analyze_real_data(youtube_only)
+    assert not any(p["dimension"] == "platform_content_real" for p in patterns)
+
+    both_platforms = youtube_only + _real_records_for_slice(
+        30, platform="instagram", entity_key="sba_ig", channel_name_ar="سبا", content_type="short", performance_index=0.3
+    )
+    patterns = agent.analyze_real_data(both_platforms)
+    cross = [p for p in patterns if p["dimension"] == "platform_content_real"]
+    assert cross, "expected a platform_content_real pattern when both platforms have enough samples"
+    for p in cross:
+        assert p["source"] == "real_sba"
+
+
+def test_real_data_patterns_merge_into_store_with_real_patterns_first():
+    store_path = agent.STORE_PATH.parent / "_test_merged_real_store.json"
+    try:
+        real_records = _real_records_for_slice(30, content_type="short", performance_index=2.5) + _real_records_for_slice(
+            30, content_type="video", performance_index=1.0
+        )
+        real = agent.analyze_real_data(real_records)
+        records = agent._load_records(agent.DATA_PATH)
+        synthetic = agent.analyze(records)
+
+        merged = agent.upsert_store(real + synthetic, store_path)
+        assert len(merged) == len(real) + len(synthetic)
+        # Real patterns were inserted first, and dict insertion order is preserved by upsert_store.
+        first_ids = [p["pattern_id"] for p in merged[: len(real)]]
+        assert first_ids == [p["pattern_id"] for p in real]
+    finally:
+        store_path.unlink(missing_ok=True)
+
+
 def test_real_awj_sada_patterns_merge_into_store_alongside_others():
     store_path = agent.STORE_PATH.parent / "_test_merged_awj_store.json"
     try:
