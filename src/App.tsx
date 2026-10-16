@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import LoginView from './components/LoginView';
 import Toast, { type ToastMessage } from './components/Toast';
-import type { ActiveView, CollectorStatus, NotificationItem } from './types';
+import type { ActiveView, CollectorStatus, NotificationItem, OptimizerDraft } from './types';
 import { apiFetch, getToken, isAuthRequired, setToken, UNAUTHORIZED_EVENT } from './lib/api';
 import { Bell, CheckCheck, X, AlertTriangle, Trophy, BarChart3, LogOut, Loader2 } from 'lucide-react';
 
@@ -166,6 +166,12 @@ export default function App() {
   const [authState, setAuthState] = useState<AuthState>(getToken() ? 'ready' : 'checking');
   const [authRequired, setAuthRequired] = useState(true);
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
+  // An insight elsewhere (e.g. an audience request) can open the optimizer pre-filled.
+  const [optimizerDraft, setOptimizerDraft] = useState<OptimizerDraft | null>(null);
+  const openOptimizer = (draft: OptimizerDraft) => {
+    setOptimizerDraft(draft);
+    setActiveView('optimizer');
+  };
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -319,9 +325,9 @@ export default function App() {
         <div className="p-7 max-w-[1440px] mx-auto">
           <Suspense fallback={<div className="flex justify-center py-24"><Loader2 className="w-6 h-6 text-emerald-600 animate-spin" /></div>}>
             {activeView === 'dashboard' && <DashboardView onNotify={showToast} />}
-            {activeView === 'optimizer' && <OptimizerView onNotify={showToast} />}
+            {activeView === 'optimizer' && <OptimizerView key={optimizerDraft?.text ?? 'blank'} onNotify={showToast} initialDraft={optimizerDraft} />}
             {activeView === 'broadcast' && <AlertsView onNotify={showToast} />}
-            {activeView === 'audience' && <AudienceView onNotify={showToast} />}
+            {activeView === 'audience' && <AudienceView onNotify={showToast} onCreateDraft={openOptimizer} />}
           </Suspense>
         </div>
       </main>

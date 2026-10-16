@@ -164,6 +164,7 @@ export interface DiagnosisResult {
 export interface SentimentStats {
   comments: number;
   classified: number; // the rest are unclassified - never counted as neutral
+  directed: number; // about the channel/content itself, not reactions to the news
   positive: number;
   negative: number;
   neutral: number;
@@ -205,4 +206,60 @@ export interface AudienceSummary {
     change_pct: number | null;
     points: { at: string; followers: number }[];
   }[];
+}
+
+export interface AudienceTheme {
+  title: string;
+  kind: 'request' | 'criticism';
+  recommendation: string;
+  topic: string;
+  count: number;
+  likes: number;
+  accounts: { platform: Platform; entity_key: string; name_ar: string; count: number }[];
+  main_platform: Platform;
+  main_entity_key: string;
+  examples: { text: string; url: string; channel_name_ar: string; platform: Platform; like_count: number | null }[];
+}
+
+export interface AudienceThemes {
+  generated_at: string;
+  days: number;
+  platform: Platform | null;
+  n_comments: number;
+  status: 'ok' | 'not_enough_comments' | 'no_llm' | 'llm_failed';
+  themes: AudienceTheme[];
+}
+
+export interface LabelScores {
+  accuracy: number;
+  macro_f1: number | null;
+  kappa: number;
+  per_class: { label: string; precision: number; recall: number; f1: number; support: number }[];
+}
+
+export interface AudienceAccuracy {
+  n: number;
+  pending: number;
+  min_for_accuracy: number;
+  preliminary: boolean;
+  model: string;
+  sentiment: LabelScores | null;
+  intent: LabelScores | null;
+}
+
+export interface ReviewItem {
+  comment_id: string;
+  text: string;
+  platform: Platform;
+  channel_name_ar: string;
+  url: string;
+  title: string;
+}
+
+// Hand-off from an insight (e.g. an audience request) to the content optimizer.
+export interface OptimizerDraft {
+  text: string;
+  topic?: string;
+  entityKey?: string;
+  source: string; // shown to the user: where this draft came from
 }

@@ -56,3 +56,31 @@ def test_missing_key(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", " ")
     with pytest.raises(llm_client.MissingApiKeyError):
         llm_client.get_keys()
+
+
+def test_overloaded_model_is_retried_then_skipped(fake, monkeypatch):
+    log, _ = fake
+    monkeypatch.setattr(llm_client, "OVERLOAD_BACKOFF_S", 0)
+
+    class Busy(Exception):
+        code = 503
+
+    calls = {"n": 0}
+    original = llm_client._client_for
+
+    def busy_once(key):
+        client = original(key)
+        real = client.models.generate_content
+
+        def flaky(model, contents, config):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise Busy("503 UNAVAILABLE")
+            return real(model, contents, config)
+
+        client.models.generate_content = flaky
+        return client
+
+    monkeypatch.setattr(llm_client, "_client_for", busy_once)
+    assert llm_client.generate_json("p") == '{"by": "k1/flash"}'  # one short retry, same key/model
+    assert llm_client._exhausted == {}  # a spike is not treated as an exhausted quota

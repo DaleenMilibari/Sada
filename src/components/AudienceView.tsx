@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ExternalLink, Heart, Loader2, MessageCircle, MessagesSquare, Smile, TrendingUp, Users } from 'lucide-react';
+import { ExternalLink, Heart, Loader2, MessageCircle, MessagesSquare, Smile, Target, TrendingUp } from 'lucide-react';
 import { apiFetch, describeError } from '../lib/api';
-import type { AudienceSummary, Platform, SentimentStats } from '../types';
+import type { AudienceSummary, AudienceThemes, OptimizerDraft, Platform, SentimentStats } from '../types';
+import { AccuracyPanel, audienceShares, InsightsCard, ThemesCard } from './AudienceInsights';
 
 interface AudienceViewProps {
   onNotify?: (title: string, desc?: string, type?: 'success' | 'info') => void;
+  onCreateDraft?: (draft: OptimizerDraft) => void;
 }
 
 const REFRESH_MS = 60_000;
@@ -27,7 +29,7 @@ const INTENT_STYLE: Record<string, string> = {
 
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 const percent = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 0 });
-const signedPercent = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 2, signDisplay: 'always' });
+const signedPercent = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 0, signDisplay: 'always' });
 
 function Segmented<T extends string | number>({ options, value, onChange }: {
   options: { key: T; label: string }[];
@@ -68,20 +70,28 @@ function Kpi({ icon, label, value, hint }: { icon: React.ReactNode; label: strin
 }
 
 // Stacked positive / neutral / negative bar over classified comments; says so when the sample is too small.
+// Positive / neutral / negative among the replies that talk about the channel itself.
+const MIN_DIRECTED = 10;
 function SentimentBar({ s }: { s: SentimentStats }) {
-  if (s.positive_share === null || s.classified === 0) {
-    return <p className="text-[11px] text-slate-400 font-arabic">عينة غير كافية ({s.classified} مصنّف)</p>;
+  if (s.directed < MIN_DIRECTED) {
+    return (
+      <p className="text-[11px] text-slate-400 font-arabic">
+        ردود قليلة تتحدث عن القناة نفسها ({s.directed} من {s.classified}) - لا يكفي للحكم
+      </p>
+    );
   }
-  const part = (n: number) => `${(n / s.classified) * 100}%`;
+  const neutral = s.directed - s.positive - s.negative;
+  const part = (n: number) => `${(n / s.directed) * 100}%`;
   return (
     <div>
       <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-100">
         <div className="bg-emerald-500" style={{ width: part(s.positive) }} title={`إيجابي ${s.positive}`} />
-        <div className="bg-slate-300" style={{ width: part(s.neutral) }} title={`محايد ${s.neutral}`} />
+        <div className="bg-slate-300" style={{ width: part(neutral) }} title={`محايد ${neutral}`} />
         <div className="bg-rose-500" style={{ width: part(s.negative) }} title={`سلبي ${s.negative}`} />
       </div>
       <p className="text-[10px] text-slate-500 font-arabic mt-1">
-        إيجابي {percent.format(s.positive_share)} · سلبي {percent.format(s.negative_share ?? 0)} · n={s.classified}
+        إيجابي {percent.format(s.positive / s.directed)} · سلبي {percent.format(s.negative / s.directed)} · من {s.directed} رداً
+        يتحدث عن القناة (و{s.classified - s.directed} رداً تفاعلاً مع الحدث)
       </p>
     </div>
   );
@@ -102,11 +112,28 @@ function Card({ title, subtitle, icon, children }: { title: string; subtitle?: s
   );
 }
 
-export default function AudienceView({ onNotify }: AudienceViewProps) {
+export default function AudienceView({ onNotify, onCreateDraft }: AudienceViewProps) {
   const [platform, setPlatform] = useState<Platform | 'all'>('all');
   const [days, setDays] = useState(30);
   const [summary, setSummary] = useState<AudienceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [themes, setThemes] = useState<AudienceThemes | null>(null);
+  const [themesLoading, setThemesLoading] = useState(false);
+
+  // Themes need one (cached) AI call, so they load separately and don't hold up the page.
+  useEffect(() => {
+    let alive = true;
+    setThemes(null);
+    setThemesLoading(true);
+    const query = `days=${days}${platform === 'all' ? '' : `&platform=${platform}`}`;
+    apiFetch<AudienceThemes>(`/api/audience/themes?${query}`)
+      .then((t) => alive && setThemes(t))
+      .catch(() => alive && setThemes({ generated_at: '', days, platform: null, n_comments: 0, status: 'llm_failed', themes: [] }))
+      .finally(() => alive && setThemesLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [days, platform]);
 
   const load = useCallback(async () => {
     try {
@@ -129,6 +156,9 @@ export default function AudienceView({ onNotify }: AudienceViewProps) {
 
   const t = summary?.totals;
   const empty = summary && t && t.comments === 0 && summary.follower_growth.length === 0;
+  // Replies about the channels/content themselves (not reactions to the news) - the base for sentiment shares.
+  const { classified, directed } = summary ? audienceShares(summary) : { classified: 0, directed: 0 };
+  const directedShare = classified >= 10 ? directed / classified : null;
 
   return (
     <div className="space-y-6">
@@ -162,25 +192,39 @@ export default function AudienceView({ onNotify }: AudienceViewProps) {
 
       {summary && t && !empty && (
         <>
+          <InsightsCard summary={summary} themes={themes} />
+
           <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-            <Kpi icon={<MessageCircle className="w-5 h-5" />} label="تعليقات وردود مجمّعة" value={t.comments.toLocaleString('en')} />
+            <Kpi
+              icon={<MessageCircle className="w-5 h-5" />}
+              label="ردود وتعليقات حلّلها الذكاء الاصطناعي"
+              value={`${t.classified.toLocaleString('en')} من ${t.comments.toLocaleString('en')}`}
+              hint="بلا أي بيانات تعريفية"
+            />
+            <Kpi
+              icon={<Target className="w-5 h-5" />}
+              label="تتحدث عن القنوات أو محتواها"
+              value={directedShare === null ? '—' : percent.format(directedShare)}
+              hint={`${directed} رداً`}
+            />
+            <Kpi
+              icon={<Heart className="w-5 h-5" />}
+              label="إيجابية من الردود الموجّهة للقنوات"
+              value={directed >= 10 ? percent.format(t.positive / directed) : '—'}
+              hint={directed >= 10 ? `سلبية: ${percent.format(t.negative / directed)}` : 'عينة صغيرة'}
+            />
             <Kpi
               icon={<Smile className="w-5 h-5" />}
-              label="صافي المشاعر تجاه الهيئة (إيجابي − سلبي)"
-              value={t.net_sentiment === null ? '—' : signedPercent.format(t.net_sentiment)}
-              hint={`n=${t.classified}`}
-            />
-            <Kpi icon={<Heart className="w-5 h-5" />} label="نسبة الإيجابي" value={t.positive_share === null ? '—' : percent.format(t.positive_share)} />
-            <Kpi
-              icon={<Users className="w-5 h-5" />}
-              label="المصنّفة بالذكاء الاصطناعي"
-              value={`${t.classified.toLocaleString('en')} من ${t.comments.toLocaleString('en')}`}
-              hint="غير المصنّف لا يُحسب محايداً"
+              label="صافي الموقف من القنوات (إيجابي − سلبي)"
+              value={directed >= 10 ? signedPercent.format((t.positive - t.negative) / directed) : '—'}
+              hint="من الردود الموجّهة لها"
             />
           </div>
 
+          <ThemesCard themes={themes} loading={themesLoading} onCreateDraft={onCreateDraft} onNotify={onNotify} />
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <Card title="المشاعر تجاه كل حساب" subtitle="تجاه القناة ومحتواها وتغطيتها - التفاعل مع الحدث نفسه يُحسب محايداً" icon={<Smile className="w-4 h-4" />}>
+            <Card title="الموقف من كل حساب" subtitle="من الردود التي تتحدث عن القناة أو محتواها أو تغطيتها - لا من التفاعل مع الخبر نفسه" icon={<Smile className="w-4 h-4" />}>
               <div className="space-y-4">
                 {summary.by_channel.length === 0 && <p className="text-xs text-slate-400 font-arabic">لا توجد بيانات.</p>}
                 {summary.by_channel.map((c) => (
@@ -198,14 +242,17 @@ export default function AudienceView({ onNotify }: AudienceViewProps) {
             <Card title="نمو المتابعين" subtitle="من قياسات دورية لعدد المتابعين" icon={<TrendingUp className="w-4 h-4" />}>
               <div className="space-y-3">
                 {summary.follower_growth.length === 0 && <p className="text-xs text-slate-400 font-arabic">لا توجد قياسات بعد.</p>}
+                {summary.follower_growth.length > 0 && summary.follower_growth.every((g) => g.change === null) && (
+                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2 font-arabic">
+                    سُجّل أول قياس لكل حساب. يُحسب النمو تلقائياً بعد القياس التالي (كل 6 ساعات ليوتيوب، ويومياً لإكس).
+                  </p>
+                )}
                 {summary.follower_growth.map((g) => (
                   <div key={`${g.platform}-${g.entity_key}`} className="flex items-center justify-between text-xs">
                     <span className="font-bold text-slate-800 font-arabic">{g.name_ar} ({PLATFORM_LABEL[g.platform]})</span>
                     <span className="text-slate-600">
                       {compact.format(g.last)}
-                      {g.change === null ? (
-                        <span className="text-[10px] text-slate-400 font-arabic mr-2">يحتاج قياساً ثانياً</span>
-                      ) : (
+                      {g.change === null ? null : (
                         <span className={`mr-2 font-bold ${g.change >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                           {g.change >= 0 ? '+' : ''}{compact.format(g.change)} ({signedPercent.format(g.change_pct ?? 0)})
                         </span>
@@ -248,6 +295,8 @@ export default function AudienceView({ onNotify }: AudienceViewProps) {
               </div>
             )}
           </Card>
+
+          <AccuracyPanel onNotify={onNotify} />
 
           <Card title="أكثر المنشورات إثارة للنقاش" subtitle="حسب عدد التعليقات المجمّعة" icon={<MessageCircle className="w-4 h-4" />}>
             <div className="space-y-4">

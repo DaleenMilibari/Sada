@@ -565,7 +565,43 @@ def build_video_diagnosis_context(post: dict[str, Any]) -> dict[str, Any]:
                         "recommendation": None,
                     })
 
+    audience = _audience_factor(post, base_conf)
+    if audience:
+        factors.append(audience)
+
     return {"post": post, "comparable": comparable, "basis": basis, "factors": factors, "direction": direction, "ratio": ratio, "low_confidence": False}
+
+
+MIN_AUDIENCE_COMMENTS = 5
+_INTENT_AR = {"praise": "إشادة", "criticism": "انتقاد", "request": "طلبات", "question": "أسئلة", "reaction": "تفاعل مع الحدث", "other": "أخرى"}
+
+
+def _audience_factor(post: dict[str, Any], base_conf: float) -> dict[str, Any] | None:
+    """What this post's own audience said (audience_agent's classification) - context, not a cause."""
+    a = db.audience_comments.c
+    with db.get_engine().connect() as conn:
+        rows = conn.execute(
+            select(a.intent, a.sentiment).where(a.video_id == post["video_id"], a.intent.isnot(None))
+        ).all()
+    if len(rows) < MIN_AUDIENCE_COMMENTS:
+        return None
+    counts: dict[str, int] = {}
+    for intent, _ in rows:
+        counts[intent] = counts.get(intent, 0) + 1
+    top = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:3]
+    breakdown = "، ".join(f"{_INTENT_AR.get(k, k)} {v * 100 // len(rows)}%" for k, v in top)
+    criticism = counts.get("criticism", 0)
+    return {
+        "reason": (
+            f"ردود الجمهور على هذا المنشور ({len(rows)} رداً مصنّفاً): {breakdown}."
+            + (f" منها {criticism} انتقاداً موجّهاً للقناة أو المحتوى." if criticism else "")
+        ),
+        "supporting_metric": f"تصنيف وكيل تحليل الجمهور لـ {len(rows)} رداً على المنشور نفسه",
+        "evidence_source_title": post["title"],
+        "evidence_url_or_ref": post["url"],
+        "confidence": round(base_conf * 0.6, 2),
+        "recommendation": "راجع الانتقادات الموجّهة للمحتوى في ردود الجمهور قبل نشر محتوى مشابه." if criticism >= 3 else None,
+    }
 
 
 def _deterministic_synthesis(ctx: dict[str, Any]) -> tuple[str, list[str]]:

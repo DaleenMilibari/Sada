@@ -33,7 +33,11 @@ from backend.agents import (
 )
 from backend.rate_limit import limit_llm, limit_login
 from backend.schemas import (
+    AudienceAccuracy,
+    AudienceThemes,
     AudienceSummary,
+    ReviewItem,
+    ReviewLabel,
     Alert,
     AnalyticsSummary,
     VideoDiagnosisRequest,
@@ -305,6 +309,31 @@ def get_audience_summary(
     platform: Literal["youtube", "instagram", "x"] | None = None,
 ):
     return audience_agent.summary(days, platform)
+
+
+@api.get("/audience/themes", response_model=AudienceThemes, dependencies=[Depends(limit_llm)])
+def get_audience_themes(
+    days: int = Query(default=30, ge=1, le=365),
+    platform: Literal["youtube", "instagram", "x"] | None = None,
+):
+    return audience_agent.themes(days, platform)
+
+
+@api.get("/audience/accuracy", response_model=AudienceAccuracy)
+def get_audience_accuracy():
+    return audience_agent.accuracy()
+
+
+@api.get("/audience/review/next", response_model=list[ReviewItem])
+def get_review_queue(limit: int = Query(default=1, ge=1, le=20)):
+    return audience_agent.review_queue(limit)
+
+
+@api.post("/audience/review")
+def post_review_label(label: ReviewLabel):
+    if not audience_agent.save_label(label.comment_id, label.sentiment, label.intent):
+        raise HTTPException(status_code=404, detail="Comment not found")
+    return {"saved": True}
 
 
 app.include_router(api)

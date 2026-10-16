@@ -4,9 +4,11 @@ import {
   Loader2, Sparkles, ChevronDown, Copy, Check, AlertTriangle, Radio
 } from 'lucide-react';
 import { ApiError, apiFetch, describeError } from '../lib/api';
+import type { OptimizerDraft } from '../types';
 
 interface OptimizerViewProps {
   onNotify?: (title: string, desc?: string, type?: 'success' | 'info') => void;
+  initialDraft?: OptimizerDraft | null; // opened from an insight, e.g. an audience request
 }
 
 // Mirrors backend/schemas.py::OptimizationResult.
@@ -108,14 +110,14 @@ function formatLift(score: number): string {
   return `${lift >= 0 ? '+' : ''}${lift}%`;
 }
 
-export default function OptimizerView({ onNotify }: OptimizerViewProps) {
+export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewProps) {
   const [channels, setChannels] = useState<ChannelOut[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(true);
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
-  const [content, setContent] = useState(TEMPLATES[0].text);
+  const [content, setContent] = useState(initialDraft?.text ?? TEMPLATES[0].text);
   const [tone, setTone] = useState<(typeof TONES)[number]>('تفاعلي');
   const [contentType, setContentType] = useState('video');
-  const [topic, setTopic] = useState('national_event');
+  const [topic, setTopic] = useState(initialDraft?.topic ?? 'national_event');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [result, setResult] = useState<OptimizationResult | null>(null);
@@ -134,8 +136,9 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
         const list = await apiFetch<ChannelOut[]>('/api/channels');
         if (cancelled) return;
         setChannels(list);
-        // Pre-select everything so a first-time user sees results immediately.
-        setSelectedChannels(list.map((c) => c.entity_key));
+        // A draft from an insight targets its account; otherwise pre-select everything.
+        const target = initialDraft?.entityKey;
+        setSelectedChannels(target && list.some((c) => c.entity_key === target) ? [target] : list.map((c) => c.entity_key));
       } catch (err) {
         if (!cancelled) {
           const { title, desc } = describeError(err);
@@ -232,6 +235,14 @@ export default function OptimizerView({ onNotify }: OptimizerViewProps) {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* ── Input Panel (Right, 2 cols) ── */}
         <div className="lg:col-span-2 space-y-4">
+          {initialDraft && (
+            <div className="flex items-start gap-2 p-3 rounded-2xl bg-sky-50 border border-sky-200 text-sky-900">
+              <Sparkles className="w-4 h-4 mt-0.5 shrink-0" />
+              <p className="text-xs font-arabic leading-relaxed">
+                <strong>مسودة من {initialDraft.source}.</strong> عدّل النص إن أردت، ثم اضغط «تحسين واختبار المتغيرات» ليقترح الوكيل أفضل صياغة وحساب ووقت نشر.
+              </p>
+            </div>
+          )}
           {/* Quick Presets */}
           <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs">
             <label className="block text-xs font-bold text-slate-500 font-arabic mb-2.5">

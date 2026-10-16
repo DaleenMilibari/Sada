@@ -116,6 +116,17 @@ audience_comments = Table(
     Column("classified_at", DateTime(timezone=True)),
 )
 
+# Blind human labels for a sample of audience comments - the ground truth that the
+# agent's classification accuracy is measured against (audience_agent.accuracy()).
+audience_labels = Table(
+    "audience_labels",
+    metadata,
+    Column("comment_id", String(64), ForeignKey("audience_comments.comment_id"), primary_key=True),
+    Column("sentiment", String(16), nullable=False),
+    Column("intent", String(16), nullable=False),
+    Column("labeled_at", DateTime(timezone=True), nullable=False),
+)
+
 # Follower/subscriber count per account over time (the channels table keeps only the latest).
 follower_snapshots = Table(
     "follower_snapshots",

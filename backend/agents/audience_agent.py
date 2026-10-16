@@ -25,7 +25,7 @@ from collections import Counter
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import bindparam, select, update
+from sqlalchemy import bindparam, func, select, update
 
 from backend import db, repository
 from backend.agents import llm_client
@@ -55,6 +55,7 @@ _lock = threading.Lock()
 def clear_cache() -> None:
     with _lock:
         _cache.clear()
+        _themes_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +138,9 @@ def _shares(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "comments": len(rows),
         "classified": len(classified),
+        # About SBA / the channel / its content (not reactions to the news, not off-topic):
+        # the meaningful base for "how does the audience feel about us".
+        "directed": sum(1 for r in classified if r["intent"] not in SBA_NEUTRAL_INTENTS),
         "positive": counts["positive"],
         "negative": counts["negative"],
         "neutral": counts["neutral"],
@@ -262,6 +266,209 @@ def summary(days: int = 30, platform: str | None = None) -> dict[str, Any]:
     result = build_summary(days, platform)
     with _lock:
         _cache[key] = (now, result)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Human review: blind labels and measured accuracy
+# ---------------------------------------------------------------------------
+#
+# A reviewer labels comments WITHOUT seeing the agent's label (no anchoring); the
+# agent's accuracy is then measured on every comment both have labeled. Same
+# definitions as the classifier, including "reaction"/"other" => neutral toward SBA.
+
+MIN_FOR_ACCURACY = 30  # below this the numbers are shown as preliminary
+
+
+def review_queue(limit: int = 1) -> list[dict[str, Any]]:
+    """Next agent-classified comments with no human label yet - text only, never the agent's label."""
+    a, l, v, c = db.audience_comments.c, db.audience_labels.c, db.videos.c, db.channels.c
+    stmt = (
+        select(a.comment_id, a.text, a.platform, c.name_ar.label("channel_name_ar"), v.url, v.title)
+        .join(db.videos, a.video_id == v.video_id)
+        .join(db.channels, v.channel_id == c.channel_id)
+        .outerjoin(db.audience_labels, l.comment_id == a.comment_id)
+        .where(a.sentiment.isnot(None), l.comment_id.is_(None))
+        .order_by(func.substr(a.comment_id, -3), a.comment_id)  # spread across posts/accounts, deterministic
+        .limit(limit)
+    )
+    with db.get_engine().connect() as conn:
+        return [r._asdict() for r in conn.execute(stmt)]
+
+
+def save_label(comment_id: str, sentiment: str, intent: str) -> bool:
+    if sentiment not in SENTIMENTS or intent not in INTENTS:
+        raise ValueError("invalid label")
+    if intent in SBA_NEUTRAL_INTENTS:
+        sentiment = "neutral"
+    with db.get_engine().begin() as conn:
+        exists_ = conn.execute(
+            select(db.audience_comments.c.comment_id).where(db.audience_comments.c.comment_id == comment_id)
+        ).first()
+        if not exists_:
+            return False
+        db.upsert(conn, db.audience_labels,
+                  [{"comment_id": comment_id, "sentiment": sentiment, "intent": intent, "labeled_at": db.utcnow()}],
+                  "comment_id", ["sentiment", "intent", "labeled_at"])
+    return True
+
+
+def _scores(pairs: list[tuple[str, str]], classes: list[str]) -> dict[str, Any]:
+    """Accuracy, macro-F1, Cohen's kappa and per-class precision/recall over (human, model) pairs."""
+    n = len(pairs)
+    correct = sum(h == m for h, m in pairs)
+    per_class, f1s = [], []
+    for k in classes:
+        tp = sum(h == k and m == k for h, m in pairs)
+        pred = sum(m == k for _, m in pairs)
+        true = sum(h == k for h, _ in pairs)
+        if true == 0 and pred == 0:
+            continue
+        precision = tp / pred if pred else 0.0
+        recall = tp / true if true else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        f1s.append(f1)
+        per_class.append({"label": k, "precision": round(precision, 3), "recall": round(recall, 3), "f1": round(f1, 3), "support": true})
+    p_o = correct / n
+    p_e = sum((sum(h == k for h, _ in pairs) / n) * (sum(m == k for _, m in pairs) / n) for k in classes)
+    kappa = (p_o - p_e) / (1 - p_e) if p_e < 1 else 1.0
+    return {
+        "accuracy": round(p_o, 3),
+        "macro_f1": round(sum(f1s) / len(f1s), 3) if f1s else None,
+        "kappa": round(kappa, 3),
+        "per_class": per_class,
+    }
+
+
+def accuracy() -> dict[str, Any]:
+    a, l = db.audience_comments.c, db.audience_labels.c
+    with db.get_engine().connect() as conn:
+        rows = conn.execute(
+            select(l.sentiment, l.intent, a.sentiment.label("m_sentiment"), a.intent.label("m_intent"))
+            .join(db.audience_comments, a.comment_id == l.comment_id)
+            .where(a.sentiment.isnot(None))
+        ).all()
+        pending = conn.execute(
+            select(func.count()).select_from(db.audience_comments)
+            .outerjoin(db.audience_labels, l.comment_id == a.comment_id)
+            .where(a.sentiment.isnot(None), l.comment_id.is_(None))
+        ).scalar() or 0
+    n = len(rows)
+    result: dict[str, Any] = {
+        "n": n,
+        "pending": pending,
+        "min_for_accuracy": MIN_FOR_ACCURACY,
+        "preliminary": n < MIN_FOR_ACCURACY,
+        "model": llm_client.get_model(),
+        "sentiment": None,
+        "intent": None,
+    }
+    if n:
+        result["sentiment"] = _scores([(r.sentiment, r.m_sentiment) for r in rows], list(SENTIMENTS))
+        result["intent"] = _scores([(r.intent, r.m_intent) for r in rows], list(INTENTS))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Themes: what the audience asks for / criticizes, turned into recommendations
+# ---------------------------------------------------------------------------
+#
+# Gemini groups request + criticism comments into themes and words one actionable
+# recommendation per theme. Everything countable is computed here, not by the model:
+# members are validated indices into the comments sent, counts and accounts come from
+# the data, and a theme needs MIN_THEME_EVIDENCE real comments to be shown.
+
+THEME_KINDS = ("request", "criticism")
+MIN_THEME_EVIDENCE = 2
+MAX_THEME_INPUT = 300
+THEMES_TTL_SECONDS = 6 * 3600
+_themes_cache: dict[tuple[int, str | None, int], tuple[float, dict[str, Any]]] = {}
+
+
+def _theme_comments(days: int, platform: str | None) -> list[dict[str, Any]]:
+    rows = [r for r in _comment_rows(days, platform) if r["intent"] in THEME_KINDS]
+    rows.sort(key=lambda r: r["like_count"] or 0, reverse=True)
+    return rows[:MAX_THEME_INPUT]
+
+
+def build_themes(days: int = 30, platform: str | None = None) -> dict[str, Any]:
+    from backend.topics import TOPICS
+
+    rows = _theme_comments(days, platform)
+    result: dict[str, Any] = {"generated_at": db.utcnow(), "days": days, "platform": platform,
+                              "n_comments": len(rows), "themes": [], "status": "ok"}
+    if len(rows) < MIN_THEME_EVIDENCE:
+        result["status"] = "not_enough_comments"
+        return result
+    lines = "\n".join(
+        f"{i} | {r['intent']} | {r['channel_name_ar']} | {r['text'][:220].replace(chr(10), ' ')}" for i, r in enumerate(rows)
+    )
+    topics = ", ".join(f'"{k}" ({v})' for k, v in TOPICS.items())
+    prompt = (
+        "أنت محلل جمهور لهيئة الإذاعة والتلفزيون السعودية. هذه طلبات الجمهور وانتقاداته لقنوات الهيئة.\n"
+        "كل سطر: رقم | النوع (request طلب / criticism انتقاد) | القناة | النص.\n"
+        f"{lines}\n\n"
+        "جمّعها في 3 إلى 6 مواضيع واضحة، كل موضوع يجمع تعليقات تقول الشيء نفسه تقريباً. لكل موضوع أعد:\n"
+        '- "title": عنوان قصير وواضح بالعربية (أقل من 8 كلمات)\n'
+        '- "kind": "request" أو "criticism"\n'
+        '- "recommendation": توصية عملية واحدة لفريق المحتوى في الهيئة (جملة واحدة تبدأ بفعل)\n'
+        f'- "topic": أقرب موضوع من القائمة: {topics}\n'
+        '- "members": أرقام التعليقات التي تنتمي لهذا الموضوع فقط\n'
+        "لا تخترع مواضيع لا تدعمها التعليقات. تجاهل التعليقات التي لا تنتمي لأي موضوع.\n"
+        "تجاهل أيضاً أي تعليقات هي في الحقيقة تفاعل مع الخبر أو الحدث نفسه (دعاء، تنديد بطرف، رأي في الحكم أو الفرق) "
+        "وليست طلباً من الهيئة أو انتقاداً لقنواتها ومحتواها وتغطيتها.\n"
+        'أعد JSON فقط بالشكل: {"themes": [ ... ]}'
+    )
+    try:
+        data = json.loads(llm_client.generate_json(prompt))
+    except llm_client.MissingApiKeyError:
+        result["status"] = "no_llm"
+        return result
+    except Exception:
+        logger.exception("Audience theme extraction failed")
+        result["status"] = "llm_failed"
+        return result
+
+    used: set[int] = set()
+    for t in (data.get("themes") if isinstance(data, dict) else None) or []:
+        if not isinstance(t, dict) or t.get("kind") not in THEME_KINDS:
+            continue
+        members = sorted({m for m in t.get("members") or [] if isinstance(m, int) and 0 <= m < len(rows) and m not in used})
+        if len(members) < MIN_THEME_EVIDENCE:
+            continue  # not enough real comments behind it - never shown
+        used.update(members)
+        group = [rows[m] for m in members]
+        accounts = Counter((r["platform"], r["entity_key"], r["channel_name_ar"]) for r in group)
+        (top_platform, top_entity, _), _ = accounts.most_common(1)[0]
+        result["themes"].append({
+            "title": str(t.get("title") or "")[:80],
+            "kind": t["kind"],
+            "recommendation": str(t.get("recommendation") or "")[:300],
+            "topic": t.get("topic") if t.get("topic") in TOPICS else "other",
+            "count": len(group),
+            "likes": sum(r["like_count"] or 0 for r in group),
+            "accounts": [{"platform": p, "entity_key": k, "name_ar": n, "count": c} for (p, k, n), c in accounts.most_common()],
+            "main_platform": top_platform,
+            "main_entity_key": top_entity,
+            "examples": [{"text": r["text"][:200], "url": r["url"], "channel_name_ar": r["channel_name_ar"],
+                          "platform": r["platform"], "like_count": r["like_count"]} for r in group[:3]],
+        })
+    result["themes"].sort(key=lambda t: t["count"], reverse=True)
+    return result
+
+
+def themes(days: int = 30, platform: str | None = None) -> dict[str, Any]:
+    """One Gemini call per (window, platform, comment set), cached for THEMES_TTL_SECONDS."""
+    key = (days, platform, len(_theme_comments(days, platform)))
+    now = time.monotonic()
+    with _lock:
+        hit = _themes_cache.get(key)
+        if hit and now - hit[0] < THEMES_TTL_SECONDS:
+            return hit[1]
+    result = build_themes(days, platform)
+    if result["status"] == "ok":
+        with _lock:
+            _themes_cache[key] = (now, result)
     return result
 
 

@@ -221,3 +221,94 @@ def test_reactions_to_the_news_are_neutral_toward_sba(engine, monkeypatch):
     with engine.connect() as conn:
         labels = dict(conn.execute(select(db.audience_comments.c.comment_id, db.audience_comments.c.sentiment)).all())
     assert labels == {"c0": "neutral", "c1": "negative"}  # anger at the event is not criticism of SBA
+
+
+# --- blind human review + measured accuracy ---
+
+
+def test_review_queue_is_blind_and_skips_labeled(engine):
+    add_post(engine, "v1")
+    add_comment(engine, "a", "v1", sentiment="positive", intent="praise")
+    add_comment(engine, "b", "v1", sentiment="negative", intent="criticism")
+    add_comment(engine, "u", "v1")  # not classified by the agent yet: nothing to compare against
+
+    queue = audience_agent.review_queue(10)
+    assert {q["comment_id"] for q in queue} == {"a", "b"}
+    assert all("sentiment" not in q and "intent" not in q for q in queue)  # no anchoring on the model
+
+    assert audience_agent.save_label("a", "positive", "praise")
+    assert {q["comment_id"] for q in audience_agent.review_queue(10)} == {"b"}
+    assert not audience_agent.save_label("missing", "positive", "praise")
+
+
+def test_accuracy_against_human_labels(engine):
+    add_post(engine, "v1")
+    model = [("positive", "praise")] * 6 + [("negative", "criticism")] * 3 + [("neutral", "reaction")]
+    human = [("positive", "praise")] * 5 + [("negative", "criticism")] + [("negative", "criticism")] * 3 + [("negative", "reaction")]
+    for i, ((ms, mi), (hs, hi)) in enumerate(zip(model, human)):
+        add_comment(engine, f"c{i}", "v1", sentiment=ms, intent=mi)
+        audience_agent.save_label(f"c{i}", hs, hi)
+
+    acc = audience_agent.accuracy()
+
+    assert acc["n"] == 10 and acc["preliminary"] is True and acc["pending"] == 0
+    # human "negative + reaction" is stored as neutral (same rule as the agent) -> it matches
+    assert acc["sentiment"]["accuracy"] == 0.9 and acc["intent"]["accuracy"] == 0.9
+    praise = next(c for c in acc["intent"]["per_class"] if c["label"] == "praise")
+    assert praise["precision"] == round(5 / 6, 3) and praise["recall"] == 1.0
+    assert 0 < acc["sentiment"]["kappa"] < 1
+
+
+def test_review_endpoints(engine, monkeypatch):
+    monkeypatch.setattr(config, "AUTH_ENABLED", False)
+    add_post(engine, "v1")
+    add_comment(engine, "a", "v1", sentiment="positive", intent="praise")
+    with TestClient(app) as client:
+        item = client.get("/api/audience/review/next").json()[0]
+        assert item["comment_id"] == "a" and "sentiment" not in item
+        assert client.post("/api/audience/review", json={"comment_id": "a", "sentiment": "positive", "intent": "praise"}).json() == {"saved": True}
+        assert client.post("/api/audience/review", json={"comment_id": "a", "sentiment": "angry", "intent": "praise"}).status_code == 422
+        body = client.get("/api/audience/accuracy").json()
+        assert body["n"] == 1 and body["sentiment"]["accuracy"] == 1.0
+
+
+def test_themes_are_validated_against_real_comments(engine, monkeypatch):
+    add_post(engine, "v1")
+    for i in range(3):
+        add_comment(engine, f"r{i}", "v1", sentiment="neutral", intent="request", likes=10 - i, text=f"نبي برامج قديمة {i}")
+    add_comment(engine, "c0", "v1", sentiment="negative", intent="criticism", likes=1, text="الصوت ضعيف")
+    add_comment(engine, "p0", "v1", sentiment="positive", intent="praise", text="رائع")  # not sent to the model
+    answer = {"themes": [
+        {"title": "برامج أرشيفية", "kind": "request", "recommendation": "أعد بث البرامج القديمة", "topic": "entertainment",
+         "members": [0, 1, 2, 99, 1]},                         # 99 doesn't exist, 1 is repeated
+        {"title": "جودة الصوت", "kind": "criticism", "recommendation": "حسّن الصوت", "topic": "other", "members": [3]},  # 1 comment: too thin
+        {"title": "مخترع", "kind": "praise", "recommendation": "-", "topic": "news", "members": [0, 3]},  # wrong kind
+    ]}
+    prompts = []
+    monkeypatch.setattr(llm_client, "generate_json", lambda p: prompts.append(p) or json.dumps(answer))
+
+    result = audience_agent.build_themes(days=30)
+
+    assert "رائع" not in prompts[0]
+    assert result["status"] == "ok" and len(result["themes"]) == 1
+    t = result["themes"][0]
+    assert t["count"] == 3 and t["likes"] == 27 and t["main_entity_key"] == "riyadiya"
+    assert t["examples"][0]["url"] == "https://example.com/v1"
+
+
+def test_diagnosis_includes_what_the_posts_audience_said(engine):
+    from backend.agents import diagnostic_recommendation_agent as diag
+
+    add_post(engine, "v1")
+    for i in range(3):
+        add_comment(engine, f"c{i}", "v1", sentiment="negative", intent="criticism")
+    for i in range(3):
+        add_comment(engine, f"r{i}", "v1", sentiment="neutral", intent="reaction")
+    post = {"video_id": "v1", "title": "v1", "url": "https://example.com/v1"}
+
+    factor = diag._audience_factor(post, 0.8)
+
+    assert "6 رداً" in factor["reason"] and "3 انتقاداً" in factor["reason"]
+    assert factor["evidence_url_or_ref"] == "https://example.com/v1" and factor["recommendation"]
+    add_post(engine, "v2")
+    assert diag._audience_factor({"video_id": "v2", "title": "", "url": ""}, 0.8) is None  # too few replies: no claim

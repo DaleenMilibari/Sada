@@ -428,6 +428,7 @@ class VideoDiagnosisRequest(BaseModel):
 class SentimentStats(BaseModel):
     comments: int
     classified: int  # classified by the agent; the rest are unclassified, never counted as neutral
+    directed: int = 0  # classified comments about SBA/the channel itself (not reactions to the news)
     positive: int
     negative: int
     neutral: int
@@ -491,3 +492,81 @@ class AudienceSummary(BaseModel):
     intents: list[AudienceIntent]
     discussed_posts: list[DiscussedPost]
     follower_growth: list[FollowerGrowth]
+
+
+class ReviewItem(BaseModel):
+    """A comment to label blind - the agent's label is deliberately not included."""
+    comment_id: str
+    text: str
+    platform: Literal["youtube", "instagram", "x"]
+    channel_name_ar: str
+    url: str
+    title: str
+
+
+class ReviewLabel(BaseModel):
+    comment_id: str = Field(max_length=64)
+    sentiment: Literal["positive", "negative", "neutral"]
+    intent: Literal["praise", "criticism", "request", "question", "reaction", "other"]
+
+
+class ClassScore(BaseModel):
+    label: str
+    precision: float
+    recall: float
+    f1: float
+    support: int
+
+
+class LabelScores(BaseModel):
+    accuracy: float
+    macro_f1: float | None = None
+    kappa: float  # Cohen's kappa: agreement beyond chance (0 = chance, 1 = perfect)
+    per_class: list[ClassScore]
+
+
+class AudienceAccuracy(BaseModel):
+    n: int  # comments labeled by both a human (blind) and the agent
+    pending: int  # agent-classified comments still waiting for a human label
+    min_for_accuracy: int
+    preliminary: bool
+    model: str
+    sentiment: LabelScores | None = None
+    intent: LabelScores | None = None
+
+
+class ThemeAccount(BaseModel):
+    platform: Literal["youtube", "instagram", "x"]
+    entity_key: str
+    name_ar: str
+    count: int
+
+
+class ThemeExample(BaseModel):
+    text: str
+    url: str
+    channel_name_ar: str
+    platform: Literal["youtube", "instagram", "x"]
+    like_count: int | None = None
+
+
+class AudienceTheme(BaseModel):
+    title: str
+    kind: Literal["request", "criticism"]
+    recommendation: str
+    topic: str
+    count: int  # real comments behind the theme (validated, at least 2)
+    likes: int
+    accounts: list[ThemeAccount]
+    main_platform: Literal["youtube", "instagram", "x"]
+    main_entity_key: str
+    examples: list[ThemeExample]
+
+
+class AudienceThemes(BaseModel):
+    generated_at: datetime
+    days: int
+    platform: Literal["youtube", "instagram", "x"] | None = None
+    n_comments: int  # request + criticism comments considered
+    status: Literal["ok", "not_enough_comments", "no_llm", "llm_failed"]
+    themes: list[AudienceTheme]

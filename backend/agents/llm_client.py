@@ -5,8 +5,10 @@ deliberately - those two are pure statistics over the seeded data and
 never need an API key.
 
 GEMINI_API_KEY may hold several comma-separated keys. When a key hits its quota
-(HTTP 429), the next key is tried; when every key is exhausted on GEMINI_MODEL,
-the same keys are tried on GEMINI_FALLBACK_MODEL (a separate free-tier quota).
+(HTTP 429) - or a model isn't offered to that key's project (HTTP 404, e.g. older
+models are closed to new accounts) - the next key is tried; when every key is
+exhausted on GEMINI_MODEL, the keys are tried on each GEMINI_FALLBACK_MODEL in order
+(comma-separated; each has its own free-tier quota).
 An exhausted key/model pair is skipped for EXHAUSTED_COOLDOWN_S, so a live demo
 doesn't pay a failed round-trip on every request.
 """
@@ -78,16 +80,30 @@ def get_model() -> str:
     return os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 
+DEFAULT_FALLBACKS = "gemini-2.5-flash-lite,gemini-3.5-flash-lite,gemini-3.5-flash"
+
+
 def get_models() -> list[str]:
-    fallback = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash-lite")
     models = [get_model()]
-    if fallback and fallback not in models:
-        models.append(fallback)
+    for m in os.environ.get("GEMINI_FALLBACK_MODEL", DEFAULT_FALLBACKS).split(","):
+        if m.strip() and m.strip() not in models:
+            models.append(m.strip())
     return models
 
 
-def _is_quota_error(e: Exception) -> bool:
-    return getattr(e, "code", None) == 429 or "RESOURCE_EXHAUSTED" in str(e)
+OVERLOAD_RETRIES = 2
+OVERLOAD_BACKOFF_S = 2.0
+
+
+def _is_overloaded(e: Exception) -> bool:
+    """A temporary capacity spike (503/500) - worth a short retry, then another model."""
+    return getattr(e, "code", None) in (500, 503) or "UNAVAILABLE" in str(e)
+
+
+def _is_unavailable(e: Exception) -> bool:
+    """Out of quota (429) or the model isn't offered to this key (404) - try the next key/model."""
+    code = getattr(e, "code", None)
+    return code in (404, 429) or "RESOURCE_EXHAUSTED" in str(e) or "NOT_FOUND" in str(e)
 
 
 def generate_json(prompt: str) -> str:
@@ -102,17 +118,23 @@ def generate_json(prompt: str) -> str:
             ran_out = _exhausted.get((key, model))
             if ran_out is not None and now - ran_out < EXHAUSTED_COOLDOWN_S:
                 continue
-            try:
-                response = _client_for(key).models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(response_mime_type="application/json"),
-                )
-                return response.text
-            except Exception as e:
-                if not _is_quota_error(e):
-                    raise
-                logger.warning("Gemini quota exhausted for key #%d on %s - trying the next one", keys.index(key) + 1, model)
-                _exhausted[(key, model)] = time.monotonic()
-                last = e
-    raise QuotaExhaustedError(f"All Gemini keys are out of quota on {', '.join(get_models())}: {last}")
+            for attempt in range(OVERLOAD_RETRIES + 1):
+                try:
+                    response = _client_for(key).models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(response_mime_type="application/json"),
+                    )
+                    return response.text
+                except Exception as e:
+                    last = e
+                    if _is_overloaded(e) and attempt < OVERLOAD_RETRIES:
+                        time.sleep(OVERLOAD_BACKOFF_S * (attempt + 1))  # temporary spike: same key/model again
+                        continue
+                    if not (_is_unavailable(e) or _is_overloaded(e)):
+                        raise
+                    logger.warning("Gemini key #%d unavailable on %s (%s) - trying the next one", keys.index(key) + 1, model, getattr(e, "code", "?"))
+                    if _is_unavailable(e):  # quota / not offered: skip for the cooldown; overload: just move on this time
+                        _exhausted[(key, model)] = time.monotonic()
+                    break
+    raise QuotaExhaustedError(f"No Gemini key/model could serve the request ({', '.join(get_models())}): {last}")
