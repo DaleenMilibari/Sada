@@ -132,6 +132,24 @@ class XClient:
         return posts, (data.get("meta") or {}).get("next_token")
 
 
+    def replies(self, post_id: str, author_username: str, max_results: int) -> list[dict[str, Any]]:
+        """One page of other people's replies to a post (recent search: posts from the last 7 days).
+
+        Billed per reply returned. Only the reply text, time and likes are requested -
+        no author expansion - so no one's identity is read or stored."""
+        if not _ID_RE.match(post_id) or not _USERNAME_RE.match(author_username):
+            raise XApiError("Invalid X id or username")
+        data = self._get("/tweets/search/recent", {
+            "query": f"conversation_id:{post_id} is:reply -from:{author_username}",
+            "max_results": max(10, min(100, max_results)),
+            "sort_order": "relevancy",
+            "tweet.fields": "created_at,public_metrics,lang",
+        })
+        posts = data.get("data") or []
+        self.posts_read += len(posts)
+        return posts
+
+
 def _detail(res: httpx.Response) -> str:
     try:
         body = res.json()

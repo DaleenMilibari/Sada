@@ -37,7 +37,7 @@ from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.engine import Engine
 
 from backend import config, db
-from backend.agents import instagram_collector, llm_client, x_collector
+from backend.agents import audience_agent, audience_collector, instagram_collector, llm_client, x_collector
 from backend.agents.instagram_client import InstagramClient, InstagramRateLimited
 from backend.agents.x_client import XClient, XRateLimited
 from backend.agents.youtube_client import QuotaExceeded, YouTubeClient, parse_duration
@@ -150,6 +150,7 @@ def _sync_channels(conn, client: YouTubeClient, now: datetime) -> list[dict[str,
                 "updated_at": now,
             }
             db.upsert(conn, db.channels, [row], "channel_id", [c for c in row if c != "channel_id"])
+            db.record_followers(conn, [row], now)
         result.append({**row, "default_topic": spec["default_topic"]})
     return result
 
@@ -367,7 +368,8 @@ def run(
 
     summary = {
         "run_id": run_id, "status": "success", "new_videos": 0, "updated_videos": 0, "snapshots": 0,
-        "llm_classified": 0, "quota_units": 0, "instagram_calls": 0, "x_posts_read": 0, "error": None,
+        "llm_classified": 0, "quota_units": 0, "instagram_calls": 0, "x_posts_read": 0,
+        "audience_comments": 0, "audience_classified": 0, "error": None,
     }
     errors: list[str] = []
     partial = False
@@ -379,6 +381,7 @@ def run(
         client = client or YouTubeClient(config.YOUTUBE_API_KEY)
         try:
             partial |= _collect_youtube(engine, client, now, cutoff, budget, summary)
+            summary["audience_comments"] += audience_collector.collect_youtube(engine, client, now)
         except QuotaExceeded as e:
             partial = True
             errors.append(f"youtube: {e}")
@@ -426,6 +429,9 @@ def run(
         xr: dict[str, Any] = {"new": 0, "updated": 0, "errors": []}
         try:
             x_collector.collect(engine, x_client, now, cutoff, xr)
+            ar = audience_collector.collect_x(engine, x_client, now)
+            summary["audience_comments"] += ar["stored"]
+            xr["errors"] += ar["errors"]
             if xr["errors"]:
                 partial = True
                 errors.extend(xr["errors"])
@@ -448,6 +454,7 @@ def run(
         )
     else:
         summary["llm_classified"] = _refine_topics_with_llm(engine, llm_limit)
+        summary["audience_classified"] = audience_agent.classify_pending(config.AUDIENCE_LLM_CLASSIFY_PER_RUN)
 
     if sources_tried == 0 or sources_failed == sources_tried:
         summary["status"] = "failed"

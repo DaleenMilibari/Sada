@@ -9,6 +9,7 @@ import { Bell, CheckCheck, X, AlertTriangle, Trophy, BarChart3, LogOut, Loader2 
 const DashboardView = lazy(() => import('./components/DashboardView'));
 const OptimizerView = lazy(() => import('./components/OptimizerView'));
 const AlertsView = lazy(() => import('./components/BroadcastView'));
+const AudienceView = lazy(() => import('./components/AudienceView'));
 
 const VIEW_TITLES: Record<ActiveView, { title: string; subtitle: string }> = {
   dashboard: {
@@ -23,6 +24,10 @@ const VIEW_TITLES: Record<ActiveView, { title: string; subtitle: string }> = {
     title: 'التنبيهات والتشخيص',
     subtitle: 'رصد القفزات والانخفاضات وتشخيص أسبابها بالأدلة',
   },
+  audience: {
+    title: 'تحليل الجمهور',
+    subtitle: 'مشاعر الجمهور وطلباته ونمو المتابعين من تعليقات وردود حقيقية',
+  },
 };
 
 // Notification-center entries are recorded from real agent events (success toasts),
@@ -31,6 +36,7 @@ const VIEW_NOTIFICATION_TYPE: Record<ActiveView, NotificationItem['type']> = {
   dashboard: 'report',
   optimizer: 'optimize',
   broadcast: 'viral',
+  audience: 'report',
 };
 
 const STATUS_REFRESH_MS = 60_000;
@@ -315,6 +321,7 @@ export default function App() {
             {activeView === 'dashboard' && <DashboardView onNotify={showToast} />}
             {activeView === 'optimizer' && <OptimizerView onNotify={showToast} />}
             {activeView === 'broadcast' && <AlertsView onNotify={showToast} />}
+            {activeView === 'audience' && <AudienceView onNotify={showToast} />}
           </Suspense>
         </div>
       </main>

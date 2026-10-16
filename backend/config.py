@@ -76,6 +76,17 @@ X_MAX_POSTS_PER_RUN = int(os.environ.get("X_MAX_POSTS_PER_RUN", "4000"))
 X_MAX_POSTS_PER_ACCOUNT = int(os.environ.get("X_MAX_POSTS_PER_ACCOUNT", "600"))
 X_ENABLED = bool(X_BEARER_TOKEN)
 
+# --- Audience analysis (backend/agents/audience_collector.py, audience_agent.py) -
+# YouTube: comment threads for this many recent videos per run (1 quota unit each).
+AUDIENCE_YT_VIDEOS_PER_RUN = int(os.environ.get("AUDIENCE_YT_VIDEOS_PER_RUN", "15"))
+AUDIENCE_YT_COMMENTS_PER_VIDEO = int(os.environ.get("AUDIENCE_YT_COMMENTS_PER_VIDEO", "100"))
+# X: replies are billed like posts (~$0.005 each). 0 disables reply collection.
+X_REPLY_BUDGET = int(os.environ.get("X_REPLY_BUDGET", "1000"))  # hard cap across all runs, ~$5
+AUDIENCE_X_POSTS_PER_RUN = int(os.environ.get("AUDIENCE_X_POSTS_PER_RUN", "10"))
+X_REPLIES_PER_POST = int(os.environ.get("X_REPLIES_PER_POST", "20"))
+# Comments classified by Gemini per collector run (batches of 50; 0 disables).
+AUDIENCE_LLM_CLASSIFY_PER_RUN = int(os.environ.get("AUDIENCE_LLM_CLASSIFY_PER_RUN", "200"))
+
 # In-process scheduler. Off by default so local reloads don't burn quota.
 COLLECTOR_SCHEDULE_ENABLED = os.environ.get("COLLECTOR_SCHEDULE_ENABLED", "false").lower() == "true"
 COLLECTOR_INTERVAL_MINUTES = int(os.environ.get("COLLECTOR_INTERVAL_MINUTES", "30"))

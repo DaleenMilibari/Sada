@@ -412,3 +412,74 @@ class Alert(BaseModel):
 
 class VideoDiagnosisRequest(BaseModel):
     video_id: str
+
+
+# --- Audience analysis (backend/agents/audience_agent.py) ---
+
+
+class SentimentStats(BaseModel):
+    comments: int
+    classified: int  # classified by the agent; the rest are unclassified, never counted as neutral
+    positive: int
+    negative: int
+    neutral: int
+    # Shares over classified comments; null when fewer than 10 are classified.
+    positive_share: float | None = None
+    negative_share: float | None = None
+    net_sentiment: float | None = None  # (positive - negative) / classified, -1..1
+
+
+class AudienceChannel(SentimentStats):
+    platform: Literal["youtube", "instagram", "x"]
+    entity_key: str
+    name_ar: str
+
+
+class AudienceExample(BaseModel):
+    text: str
+    url: str
+    platform: Literal["youtube", "instagram", "x"]
+    channel_name_ar: str
+    like_count: int | None = None
+    sentiment: Literal["positive", "negative", "neutral"] | None = None
+
+
+class AudienceIntent(BaseModel):
+    intent: Literal["praise", "criticism", "request", "question", "other"]
+    label_ar: str
+    count: int
+    share: float | None = None
+    examples: list[AudienceExample]
+
+
+class DiscussedPost(SentimentStats):
+    video: VideoOut
+
+
+class FollowerPoint(BaseModel):
+    at: datetime
+    followers: int
+
+
+class FollowerGrowth(BaseModel):
+    platform: Literal["youtube", "instagram", "x"]
+    entity_key: str
+    name_ar: str
+    first_at: datetime
+    last_at: datetime
+    first: int
+    last: int
+    change: int | None = None  # null until two measurements at least half a day apart
+    change_pct: float | None = None
+    points: list[FollowerPoint]
+
+
+class AudienceSummary(BaseModel):
+    generated_at: datetime
+    days: int
+    platform: Literal["youtube", "instagram", "x"] | None = None
+    totals: SentimentStats
+    by_channel: list[AudienceChannel]
+    intents: list[AudienceIntent]
+    discussed_posts: list[DiscussedPost]
+    follower_growth: list[FollowerGrowth]

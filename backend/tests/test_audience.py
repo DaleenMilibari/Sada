@@ -1,0 +1,183 @@
+import json
+import re
+from datetime import timedelta
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import insert, inspect, select
+
+from backend import config, db
+from backend.agents import audience_agent, audience_collector, llm_client
+from backend.agents.x_client import XClient
+from backend.agents.youtube_client import YouTubeClient
+from backend.api import app
+
+NOW = db.utcnow().replace(microsecond=0)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_cache():
+    audience_agent.clear_cache()
+    yield
+    audience_agent.clear_cache()
+
+
+@pytest.fixture()
+def engine(_isolated_database):
+    with _isolated_database.begin() as conn:
+        conn.execute(insert(db.channels), [
+            {"channel_id": "UC1", "platform": "youtube", "entity_key": "riyadiya", "handle": "@Riyadiyatv", "name_ar": "الرياضية", "subscriber_count": 1000},
+            {"channel_id": "100", "platform": "x", "entity_key": "ekhbariya", "handle": "@alekhbariyatv", "name_ar": "الإخبارية", "subscriber_count": 500},
+        ])
+    return _isolated_database
+
+
+def add_post(engine, vid, *, platform="youtube", channel="UC1", age=timedelta(days=3), views=1000, comments=5):
+    with engine.begin() as conn:
+        conn.execute(insert(db.videos), {
+            "video_id": vid, "platform": platform, "channel_id": channel, "title": vid, "url": f"https://example.com/{vid}",
+            "published_at": NOW - age, "content_type": "video", "topic": "news", "topic_source": "rule",
+            "view_count": views, "like_count": 10, "comment_count": comments, "first_seen_at": NOW, "stats_updated_at": NOW,
+        })
+
+
+def add_comment(engine, cid, vid, *, platform="youtube", sentiment=None, intent=None, likes=0, text="تعليق"):
+    with engine.begin() as conn:
+        conn.execute(insert(db.audience_comments), {
+            "comment_id": cid, "platform": platform, "video_id": vid, "text": text, "published_at": NOW - timedelta(days=1),
+            "like_count": likes, "collected_at": NOW, "sentiment": sentiment, "intent": intent,
+        })
+
+
+def comment_ids(engine):
+    with engine.connect() as conn:
+        return set(conn.execute(select(db.audience_comments.c.comment_id)).scalars())
+
+
+# --- collection ---
+
+
+def _youtube(handler):
+    return YouTubeClient("key", http=httpx.Client(transport=httpx.MockTransport(handler)), backoff_seconds=0)
+
+
+def test_youtube_comments_for_recent_videos_once_and_without_authors(engine):
+    add_post(engine, "recent", views=9000)
+    add_post(engine, "old", age=timedelta(days=20))      # outside the 1-7 day window
+    add_post(engine, "silent", comments=0)                # nothing to read
+    add_post(engine, "closed", views=5000)                # comments disabled
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.params["videoId"])
+        if request.url.params["videoId"] == "closed":
+            return httpx.Response(403, json={"error": {"errors": [{"reason": "commentsDisabled"}]}})
+        item = {"id": "c1", "snippet": {"topLevelComment": {"snippet": {
+            "textDisplay": "برنامج رائع", "publishedAt": "2026-10-15T10:00:00Z", "likeCount": 7,
+            "authorDisplayName": "Someone", "authorChannelId": {"value": "UCperson"}}}}}
+        return httpx.Response(200, json={"items": [item]})
+
+    stored = audience_collector.collect_youtube(engine, _youtube(handler), NOW)
+
+    assert stored == 1 and sorted(calls) == ["closed", "recent"]
+    columns = {c["name"] for c in inspect(engine).get_columns("audience_comments")}
+    assert not any("author" in c for c in columns)  # no place to store an identity
+    with engine.connect() as conn:
+        row = conn.execute(select(db.audience_comments)).one()
+    assert row.comment_id == "yt:c1" and row.text == "برنامج رائع" and row.like_count == 7 and row.sentiment is None
+
+    calls.clear()
+    audience_collector.collect_youtube(engine, _youtube(handler), NOW)
+    assert calls == ["closed"]  # "recent" already has its comments
+
+
+def _x(handler):
+    return XClient("token", http=httpx.Client(transport=httpx.MockTransport(handler)), backoff_seconds=0)
+
+
+def test_x_replies_capped_by_budget(engine, monkeypatch):
+    monkeypatch.setattr(config, "X_REPLY_BUDGET", 25)
+    monkeypatch.setattr(config, "X_REPLIES_PER_POST", 20)
+    add_post(engine, "111", platform="x", channel="100", age=timedelta(days=2), views=9000)
+    add_post(engine, "222", platform="x", channel="100", age=timedelta(days=2), views=5000)
+    add_post(engine, "333", platform="x", channel="100", age=timedelta(days=9))  # beyond recent search
+    queries = []
+
+    def handler(request):
+        q = request.url.params["query"]
+        queries.append(q)
+        post = re.search(r"conversation_id:(\d+)", q).group(1)
+        n = int(request.url.params["max_results"])
+        replies = [{"id": f"{post}{i}", "text": "متى الحلقة القادمة؟", "created_at": "2026-10-15T10:00:00.000Z",
+                    "public_metrics": {"like_count": 1}} for i in range(n)]
+        return httpx.Response(200, json={"data": replies})
+
+    result = audience_collector.collect_x(engine, _x(handler), NOW)
+
+    assert queries[0] == "conversation_id:111 is:reply -from:alekhbariyatv"
+    assert result["stored"] == 20 and len(queries) == 1  # 5 left < 10 per call minimum
+    assert "budget" in result["errors"][0]
+    assert all(c.startswith("x:111") for c in comment_ids(engine))
+
+
+# --- classification + summary ---
+
+
+def test_classification_keeps_invalid_labels_unclassified(engine, monkeypatch):
+    add_post(engine, "v1")
+    for i in range(3):
+        add_comment(engine, f"c{i}", "v1")
+    answer = {"0": {"s": "positive", "i": "praise"}, "1": {"s": "furious", "i": "praise"}}  # "2" missing
+    monkeypatch.setattr(llm_client, "generate_json", lambda prompt: json.dumps(answer))
+
+    assert audience_agent.classify_pending(10) == 1
+    with engine.connect() as conn:
+        labels = dict(conn.execute(select(db.audience_comments.c.comment_id, db.audience_comments.c.sentiment)).all())
+    assert sorted(labels.values(), key=str) == [None, None, "positive"]
+
+
+def test_summary_shares_need_enough_classified_and_cite_examples(engine):
+    add_post(engine, "v1")
+    for i in range(6):
+        add_comment(engine, f"p{i}", "v1", sentiment="positive", intent="praise", likes=i)
+    for i in range(4):
+        add_comment(engine, f"n{i}", "v1", sentiment="negative", intent="request", text="نبي حلقة عن الدوري")
+    add_comment(engine, "u", "v1")  # unclassified: counted as a comment, never as neutral
+
+    s = audience_agent.build_summary(days=30)
+
+    assert s["totals"]["comments"] == 11 and s["totals"]["classified"] == 10 and s["totals"]["neutral"] == 0
+    assert s["totals"]["positive_share"] == 0.6 and s["totals"]["net_sentiment"] == 0.2
+    praise = next(i for i in s["intents"] if i["intent"] == "praise")
+    assert praise["count"] == 6 and praise["examples"][0]["like_count"] == 5
+    assert praise["examples"][0]["url"] == "https://example.com/v1"
+    assert s["discussed_posts"][0]["video"]["video_id"] == "v1"
+
+    add_post(engine, "v2", channel="100", platform="x")
+    add_comment(engine, "x1", "v2", platform="x", sentiment="positive", intent="praise")
+    x_only = audience_agent.build_summary(days=30, platform="x")
+    assert x_only["totals"]["comments"] == 1 and x_only["totals"]["positive_share"] is None  # n=1: no share
+
+
+def test_follower_growth_needs_two_measurements(engine):
+    with engine.begin() as conn:
+        db.record_followers(conn, [{"channel_id": "UC1", "subscriber_count": 1000}], NOW - timedelta(days=2))
+        db.record_followers(conn, [{"channel_id": "UC1", "subscriber_count": 1100}], NOW)
+        db.record_followers(conn, [{"channel_id": "100", "subscriber_count": 500}], NOW)
+
+    growth = {g["entity_key"]: g for g in audience_agent.build_summary(days=30)["follower_growth"]}
+
+    assert growth["riyadiya"]["change"] == 100 and growth["riyadiya"]["change_pct"] == 0.1
+    assert growth["ekhbariya"]["change"] is None  # one point: unknown, not zero
+
+
+def test_endpoint_contract(engine, monkeypatch):
+    monkeypatch.setattr(config, "AUTH_ENABLED", False)
+    add_post(engine, "v1")
+    add_comment(engine, "c1", "v1", sentiment="neutral", intent="question")
+    with TestClient(app) as client:
+        res = client.get("/api/audience/summary?days=30&platform=youtube")
+        assert res.status_code == 200
+        assert set(res.json()) >= {"totals", "by_channel", "intents", "discussed_posts", "follower_growth"}
+        assert client.get("/api/audience/summary?platform=tiktok").status_code == 422

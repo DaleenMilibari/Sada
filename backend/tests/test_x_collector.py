@@ -52,6 +52,8 @@ class FakeX:
         if request.url.path == "/2/users/by":
             found = [self.users[u.lower()] for u in params["usernames"].split(",") if u.lower() in self.users]
             return httpx.Response(200, json={"data": found} if found else {})
+        if request.url.path == "/2/tweets/search/recent":  # audience step: no replies in these fixtures
+            return httpx.Response(200, json={"meta": {"result_count": 0}})
         user_id = re.fullmatch(r"/2/users/(\d+)/tweets", request.url.path).group(1)
         assert params["exclude"] == "retweets,replies"
         posts = self.posts[user_id]
@@ -203,7 +205,7 @@ def test_total_budget_is_a_hard_stop_across_runs(fake, monkeypatch):
     fake.requests.clear()
     fake.add_post("100", "9999", timedelta(minutes=1))
     second = _run(fake, now=NOW + timedelta(hours=1))
-    assert second["x_posts_read"] == 0 and fake.requests == []
+    assert second["x_posts_read"] == 0 and fake.timeline_calls() == []  # replies have their own budget
     assert "budget" in second["error"]
 
 

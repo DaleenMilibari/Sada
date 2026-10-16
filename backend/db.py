@@ -95,6 +95,38 @@ video_snapshots = Table(
     Index("ix_video_snapshots_video_captured", "video_id", "captured_at"),
 )
 
+# Audience voice: public comments (YouTube) and replies (X) on SBA posts, for aggregate
+# sentiment/intent analysis (backend/agents/audience_agent.py). No author name, handle or id
+# is stored - only what was said - so nothing here identifies or profiles a person (PDPL).
+audience_comments = Table(
+    "audience_comments",
+    metadata,
+    Column("comment_id", String(64), primary_key=True),
+    Column("platform", String(16), nullable=False, index=True),
+    Column("video_id", String(32), ForeignKey("videos.video_id"), nullable=False, index=True),
+    Column("text", Text, nullable=False),
+    Column("published_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("like_count", BigInteger),
+    Column("collected_at", DateTime(timezone=True), nullable=False),
+    # Filled by the audience agent (Gemini). NULL = not classified yet - never treated as neutral.
+    # "positive" | "negative" | "neutral"
+    Column("sentiment", String(16)),
+    # "praise" | "criticism" | "request" | "question" | "other"
+    Column("intent", String(16)),
+    Column("classified_at", DateTime(timezone=True)),
+)
+
+# Follower/subscriber count per account over time (the channels table keeps only the latest).
+follower_snapshots = Table(
+    "follower_snapshots",
+    metadata,
+    Column("id", _AutoId, primary_key=True, autoincrement=True),
+    Column("channel_id", String(64), ForeignKey("channels.channel_id"), nullable=False),
+    Column("captured_at", DateTime(timezone=True), nullable=False),
+    Column("followers", BigInteger, nullable=False),
+    Index("ix_follower_snapshots_channel_captured", "channel_id", "captured_at"),
+)
+
 collector_runs = Table(
     "collector_runs",
     metadata,
@@ -168,6 +200,19 @@ def init_db(engine: Engine | None = None) -> None:
                 f"Table '{table.name}' is missing column(s) {missing}. Locally: delete backend/store/sada.db "
                 "and re-import the seed (python -m backend.db_tools import backend/data/sba_youtube_seed.json.gz)."
             )
+
+
+def record_followers(conn: Connection, rows: Iterable[dict[str, Any]], now: datetime) -> None:
+    """Append a follower snapshot for each channel row that exposes a count."""
+    snaps = [
+        {"channel_id": r["channel_id"], "captured_at": now, "followers": r["subscriber_count"]}
+        for r in rows
+        if r.get("subscriber_count") is not None
+    ]
+    if snaps:
+        from sqlalchemy import insert
+
+        conn.execute(insert(follower_snapshots), snaps)
 
 
 def utcnow() -> datetime:

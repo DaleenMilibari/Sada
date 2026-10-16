@@ -36,6 +36,9 @@ from backend.topics import classify_by_rules
 
 logger = logging.getLogger("sada.collector.x")
 
+# Follower counts are re-read once a day (a billed user lookup, ~$0.01 per account).
+FOLLOWER_REFRESH_EVERY = timedelta(hours=24)
+
 # Attached media show up in entities.urls as .../status/<id>/photo/1 or .../video/1.
 _MEDIA_URL_RE = re.compile(r"/status/\d+/(photo|video)/\d+$")
 
@@ -130,6 +133,7 @@ def _store_channel(engine: Engine, user: dict[str, Any], entity_key: str, now: d
     }
     with engine.begin() as conn:
         db.upsert(conn, db.channels, [row], "channel_id", [c for c in row if c != "channel_id"])
+        db.record_followers(conn, [row], now)
 
 
 def _store_posts(engine: Engine, rows: list[dict[str, Any]], now: datetime) -> tuple[int, int]:
@@ -166,7 +170,8 @@ def collect(engine: Engine, client: XClient, now: datetime, cutoff: datetime, re
         return result
 
     stored = _stored_accounts(engine)
-    to_lookup = [a["username"] for a in SBA_X_ACCOUNTS if a["entity_key"] not in stored]
+    stale = {k for k, row in stored.items() if row["updated_at"] is None or db.as_utc(row["updated_at"]) < now - FOLLOWER_REFRESH_EVERY}
+    to_lookup = [a["username"] for a in SBA_X_ACCOUNTS if a["entity_key"] not in stored or a["entity_key"] in stale]
     looked_up: dict[str, dict[str, Any]] = {}
     if to_lookup:
         looked_up, missing = client.users_by_username(to_lookup)
@@ -180,11 +185,11 @@ def collect(engine: Engine, client: XClient, now: datetime, cutoff: datetime, re
             result["errors"].append("x: run post budget reached (X_MAX_POSTS_PER_RUN) - remaining accounts skipped")
             break
         entity_key = entry["entity_key"]
-        if entity_key in stored:
-            channel_id, username = stored[entity_key]["channel_id"], stored[entity_key]["handle"].lstrip("@")
-        elif (user := looked_up.get(entry["username"].lower())) is not None:
-            _store_channel(engine, user, entity_key, now)
+        if (user := looked_up.get(entry["username"].lower())) is not None:
+            _store_channel(engine, user, entity_key, now)  # new account, or its daily follower refresh
             channel_id, username = user["id"], user["username"]
+        elif entity_key in stored:
+            channel_id, username = stored[entity_key]["channel_id"], stored[entity_key]["handle"].lstrip("@")
         else:
             continue  # not found - already reported
 

@@ -27,6 +27,10 @@ class YouTubeApiError(RuntimeError):
     pass
 
 
+class CommentsDisabled(YouTubeApiError):
+    """The video's owner turned comments off."""
+
+
 class QuotaExceeded(YouTubeApiError):
     pass
 
@@ -55,6 +59,8 @@ class YouTubeClient:
                 reason = _error_reason(res)
                 if res.status_code == 403 and reason in ("quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded"):
                     raise QuotaExceeded(f"YouTube quota exhausted ({reason}).")
+                if res.status_code == 403 and reason == "commentsDisabled":
+                    raise CommentsDisabled("Comments are disabled for this video.")
                 if res.status_code < 500 and res.status_code != 429:
                     raise YouTubeApiError(f"{resource} failed: HTTP {res.status_code} {reason or ''}".strip())
                 last_error = YouTubeApiError(f"{resource} failed: HTTP {res.status_code}")
@@ -93,6 +99,28 @@ class YouTubeClient:
             )
             out.extend(data.get("items") or [])
         return out
+
+
+def top_comments(client: YouTubeClient, video_id: str, max_results: int = 100) -> list[dict[str, Any]]:
+    """One commentThreads.list call (1 unit): the video's most relevant top-level comments.
+
+    Returns {comment_id, text, published_at, like_count} only - author fields are dropped here,
+    so they never reach the database."""
+    data = client._get(
+        "commentThreads",
+        {"part": "snippet", "videoId": video_id, "order": "relevance", "textFormat": "plainText",
+         "maxResults": max(1, min(100, max_results))},
+    )
+    out = []
+    for item in data.get("items") or []:
+        s = item["snippet"]["topLevelComment"]["snippet"]
+        out.append({
+            "comment_id": item["id"],
+            "text": s.get("textDisplay") or "",
+            "published_at": s.get("publishedAt"),
+            "like_count": s.get("likeCount"),
+        })
+    return out
 
 
 def _error_reason(res: httpx.Response) -> str | None:

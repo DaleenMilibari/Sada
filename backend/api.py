@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from backend import analytics, auth, config, db, repository
 from backend.agents import (
+    audience_agent,
     behavior_analysis_agent,
     anomaly_agent,
     content_optimizer_agent,
@@ -32,6 +33,7 @@ from backend.agents import (
 )
 from backend.rate_limit import limit_llm, limit_login
 from backend.schemas import (
+    AudienceSummary,
     Alert,
     AnalyticsSummary,
     VideoDiagnosisRequest,
@@ -291,6 +293,18 @@ def diagnose_video(req: VideoDiagnosisRequest):
     if result is None:
         raise HTTPException(status_code=404, detail="Video not found")
     return result
+
+
+
+# --- Audience analysis ---
+
+
+@api.get("/audience/summary", response_model=AudienceSummary)
+def get_audience_summary(
+    days: int = Query(default=30, ge=1, le=365),
+    platform: Literal["youtube", "instagram", "x"] | None = None,
+):
+    return audience_agent.summary(days, platform)
 
 
 app.include_router(api)

@@ -95,6 +95,7 @@ def _store(engine: Engine, account: dict[str, Any], entity_key: str, rows: list[
     }
     with engine.begin() as conn:
         db.upsert(conn, db.channels, [channel_row], "channel_id", [c for c in channel_row if c != "channel_id"])
+        db.record_followers(conn, [channel_row], now)
         if not rows:
             return 0, 0
         ids = [r["video_id"] for r in rows]

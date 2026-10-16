@@ -1,4 +1,4 @@
-export type ActiveView = 'dashboard' | 'optimizer' | 'broadcast';
+export type ActiveView = 'dashboard' | 'optimizer' | 'broadcast' | 'audience';
 
 export interface MetricCard {
   label: string;
@@ -156,4 +156,52 @@ export interface DiagnosisResult {
   contributing_factors: ContributingFactor[];
   recommendations: string[];
   low_confidence: boolean;
+}
+
+// --- Audience analysis (mirrors backend/schemas.py::AudienceSummary) ---
+
+export interface SentimentStats {
+  comments: number;
+  classified: number; // the rest are unclassified - never counted as neutral
+  positive: number;
+  negative: number;
+  neutral: number;
+  positive_share: number | null; // null when fewer than 10 classified
+  negative_share: number | null;
+  net_sentiment: number | null; // (positive - negative) / classified
+}
+
+export interface AudienceSummary {
+  generated_at: string;
+  days: number;
+  platform: Platform | null;
+  totals: SentimentStats;
+  by_channel: (SentimentStats & { platform: Platform; entity_key: string; name_ar: string })[];
+  intents: {
+    intent: 'praise' | 'criticism' | 'request' | 'question' | 'other';
+    label_ar: string;
+    count: number;
+    share: number | null;
+    examples: {
+      text: string;
+      url: string;
+      platform: Platform;
+      channel_name_ar: string;
+      like_count: number | null;
+      sentiment: 'positive' | 'negative' | 'neutral' | null;
+    }[];
+  }[];
+  discussed_posts: (SentimentStats & { video: VideoOut })[];
+  follower_growth: {
+    platform: Platform;
+    entity_key: string;
+    name_ar: string;
+    first_at: string;
+    last_at: string;
+    first: number;
+    last: number;
+    change: number | null; // null until two measurements half a day apart
+    change_pct: number | null;
+    points: { at: string; followers: number }[];
+  }[];
 }
