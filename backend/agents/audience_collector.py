@@ -14,6 +14,7 @@ never about individuals. Classification happens later in audience_agent.py.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -27,29 +28,52 @@ from backend.agents.youtube_client import CommentsDisabled, YouTubeClient, top_c
 
 logger = logging.getLogger("sada.collector.audience")
 
+# @handles identify people (the reply-to prefix on X names everyone in the thread), and
+# links carry no opinion - both are removed before anything is stored.
+_MENTION_RE = re.compile(r"@[\w.\-]+")
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def clean_text(text: str) -> str:
+    return " ".join(_URL_RE.sub(" ", _MENTION_RE.sub(" ", text or "")).split())
+
 
 def _parse_youtube_ts(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
 
 
-def _candidates(engine: Engine, platform: str, newest: datetime, oldest: datetime, limit: int) -> list[dict[str, Any]]:
-    """Most-viewed posts in [oldest, newest] that have comments and none collected yet."""
+def _candidates(engine: Engine, platform: str, newest: datetime, oldest: datetime, per_account: int) -> list[dict[str, Any]]:
+    """Each account's most-viewed posts in [oldest, newest] that have comments and none collected yet.
+
+    Picked per account so one high-volume channel can't take the whole budget."""
     v, c, a = db.videos.c, db.channels.c, db.audience_comments.c
     stmt = (
-        select(v.video_id, v.view_count, c.handle)
+        select(v.video_id, v.view_count, c.handle, c.channel_id)
         .join(db.channels, v.channel_id == c.channel_id)
         .where(v.platform == platform, v.published_at >= oldest, v.published_at <= newest)
         .where(func.coalesce(v.comment_count, 0) > 0)
         .where(~exists().where(a.video_id == v.video_id))
         .order_by(func.coalesce(v.view_count, 0).desc())
-        .limit(limit)
     )
+    taken: dict[str, int] = {}
+    out = []
     with engine.connect() as conn:
-        return [r._asdict() for r in conn.execute(stmt)]
+        for r in conn.execute(stmt):
+            if taken.get(r.channel_id, 0) < per_account:
+                taken[r.channel_id] = taken.get(r.channel_id, 0) + 1
+                out.append(r._asdict())
+    # Interleave accounts (best post of each, then second best, ...) so a budget cut stays fair.
+    rank: dict[str, int] = {}
+    keyed = []
+    for r in out:
+        rank[r["channel_id"]] = rank.get(r["channel_id"], 0) + 1
+        keyed.append((rank[r["channel_id"]], -(r["view_count"] or 0), r))
+    return [r for *_, r in sorted(keyed, key=lambda k: (k[0], k[1]))]
 
 
 def _store(engine: Engine, rows: list[dict[str, Any]]) -> int:
-    rows = [r for r in rows if r["text"].strip() and r["published_at"] is not None]
+    rows = [{**r, "text": clean_text(r["text"])} for r in rows]
+    rows = [r for r in rows if r["text"] and r["published_at"] is not None]  # mention/link-only: nothing said
     if not rows:
         return 0
     with engine.begin() as conn:

@@ -178,7 +178,7 @@ export interface AudienceSummary {
   totals: SentimentStats;
   by_channel: (SentimentStats & { platform: Platform; entity_key: string; name_ar: string })[];
   intents: {
-    intent: 'praise' | 'criticism' | 'request' | 'question' | 'other';
+    intent: 'praise' | 'criticism' | 'request' | 'question' | 'reaction' | 'other';
     label_ar: string;
     count: number;
     share: number | null;

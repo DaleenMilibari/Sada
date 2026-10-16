@@ -21,6 +21,7 @@ const INTENT_STYLE: Record<string, string> = {
   criticism: 'bg-rose-50 text-rose-700 border-rose-200',
   request: 'bg-sky-50 text-sky-700 border-sky-200',
   question: 'bg-amber-50 text-amber-700 border-amber-200',
+  reaction: 'bg-violet-50 text-violet-700 border-violet-200',
   other: 'bg-slate-50 text-slate-600 border-slate-200',
 };
 
@@ -57,7 +58,10 @@ function Kpi({ icon, label, value, hint }: { icon: React.ReactNode; label: strin
         <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 text-slate-600">{icon}</div>
         {hint && <span className="text-[10px] text-slate-400 font-arabic">{hint}</span>}
       </div>
-      <p className="text-2xl font-black text-slate-900">{value}</p>
+      {/* Plain numbers render LTR so signs stay in place (-0.8%, not 0.8%-); Arabic text stays RTL. */}
+      <p className="text-2xl font-black text-slate-900 font-arabic">
+        <span dir={/[؀-ۿ]/.test(value) ? 'rtl' : 'ltr'}>{value}</span>
+      </p>
       <p className="text-xs text-slate-500 font-arabic mt-1">{label}</p>
     </div>
   );
@@ -162,7 +166,7 @@ export default function AudienceView({ onNotify }: AudienceViewProps) {
             <Kpi icon={<MessageCircle className="w-5 h-5" />} label="تعليقات وردود مجمّعة" value={t.comments.toLocaleString('en')} />
             <Kpi
               icon={<Smile className="w-5 h-5" />}
-              label="صافي المشاعر (إيجابي − سلبي)"
+              label="صافي المشاعر تجاه الهيئة (إيجابي − سلبي)"
               value={t.net_sentiment === null ? '—' : signedPercent.format(t.net_sentiment)}
               hint={`n=${t.classified}`}
             />
@@ -170,13 +174,13 @@ export default function AudienceView({ onNotify }: AudienceViewProps) {
             <Kpi
               icon={<Users className="w-5 h-5" />}
               label="المصنّفة بالذكاء الاصطناعي"
-              value={`${t.classified.toLocaleString('en')} / ${t.comments.toLocaleString('en')}`}
+              value={`${t.classified.toLocaleString('en')} من ${t.comments.toLocaleString('en')}`}
               hint="غير المصنّف لا يُحسب محايداً"
             />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <Card title="المشاعر حسب الحساب" subtitle="من التعليقات المصنّفة فقط" icon={<Smile className="w-4 h-4" />}>
+            <Card title="المشاعر تجاه كل حساب" subtitle="تجاه القناة ومحتواها وتغطيتها - التفاعل مع الحدث نفسه يُحسب محايداً" icon={<Smile className="w-4 h-4" />}>
               <div className="space-y-4">
                 {summary.by_channel.length === 0 && <p className="text-xs text-slate-400 font-arabic">لا توجد بيانات.</p>}
                 {summary.by_channel.map((c) => (

@@ -181,3 +181,43 @@ def test_endpoint_contract(engine, monkeypatch):
         assert res.status_code == 200
         assert set(res.json()) >= {"totals", "by_channel", "intents", "discussed_posts", "follower_growth"}
         assert client.get("/api/audience/summary?platform=tiktok").status_code == 422
+
+
+def test_reply_candidates_are_shared_fairly_between_accounts(engine, monkeypatch):
+    with engine.begin() as conn:
+        conn.execute(insert(db.channels), {"channel_id": "200", "platform": "x", "entity_key": "riyadiya", "handle": "@riyadiyatv", "name_ar": "الرياضية", "subscriber_count": 1})
+    for i in range(3):
+        add_post(engine, f"10{i}", platform="x", channel="100", age=timedelta(days=2), views=100_000 + i)  # big account
+    add_post(engine, "201", platform="x", channel="200", age=timedelta(days=2), views=50)               # small account
+
+    picked = audience_collector._candidates(engine, "x", NOW, NOW - timedelta(days=6), per_account=2)
+
+    assert [p["video_id"] for p in picked] == ["102", "201", "101"]  # best of each account first
+
+
+def test_mentions_and_links_are_stripped_and_empty_replies_dropped(engine, monkeypatch):
+    add_post(engine, "111", platform="x", channel="100", age=timedelta(days=2))
+    texts = ["@alekhbariyatv @someone_1 الله يحفظ بلادنا 🇸🇦", "@alekhbariyatv https://t.co/abc", "شكراً @user.name على المتابعة"]
+
+    def handler(request):
+        return httpx.Response(200, json={"data": [
+            {"id": str(i), "text": t, "created_at": "2026-10-15T10:00:00.000Z"} for i, t in enumerate(texts)]})
+
+    assert audience_collector.collect_x(engine, _x(handler), NOW)["stored"] == 2
+    with engine.connect() as conn:
+        stored = sorted(conn.execute(select(db.audience_comments.c.text)).scalars())
+    assert stored == ["الله يحفظ بلادنا 🇸🇦", "شكراً على المتابعة"]
+
+
+def test_reactions_to_the_news_are_neutral_toward_sba(engine, monkeypatch):
+    add_post(engine, "v1")
+    add_comment(engine, "c0", "v1", text="الله ينتقم من المعتدين")
+    add_comment(engine, "c1", "v1", text="تغطية ضعيفة جداً")
+    answer = {"0": {"s": "negative", "i": "reaction"}, "1": {"s": "negative", "i": "criticism"}}
+    monkeypatch.setattr(llm_client, "generate_json", lambda prompt: json.dumps(answer))
+
+    audience_agent.classify_pending(10)
+
+    with engine.connect() as conn:
+        labels = dict(conn.execute(select(db.audience_comments.c.comment_id, db.audience_comments.c.sentiment)).all())
+    assert labels == {"c0": "neutral", "c1": "negative"}  # anger at the event is not criticism of SBA

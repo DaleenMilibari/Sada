@@ -111,7 +111,7 @@ audience_comments = Table(
     # Filled by the audience agent (Gemini). NULL = not classified yet - never treated as neutral.
     # "positive" | "negative" | "neutral"
     Column("sentiment", String(16)),
-    # "praise" | "criticism" | "request" | "question" | "other"
+    # "praise" | "criticism" | "request" | "question" | "reaction" (to the news itself, not SBA) | "other"
     Column("intent", String(16)),
     Column("classified_at", DateTime(timezone=True)),
 )

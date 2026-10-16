@@ -445,7 +445,7 @@ class AudienceExample(BaseModel):
 
 
 class AudienceIntent(BaseModel):
-    intent: Literal["praise", "criticism", "request", "question", "other"]
+    intent: Literal["praise", "criticism", "request", "question", "reaction", "other"]
     label_ar: str
     count: int
     share: float | None = None

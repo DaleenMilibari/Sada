@@ -38,9 +38,12 @@ INTENTS = {
     "criticism": "انتقاد وملاحظات",
     "request": "طلبات واقتراحات محتوى",
     "question": "أسئلة واستفسارات",
+    "reaction": "تفاعل مع الحدث نفسه",
     "other": "أخرى",
 }
-BATCH_SIZE = 50
+# Not about SBA or its content -> neutral toward SBA by definition, whatever tone the model read.
+SBA_NEUTRAL_INTENTS = ("reaction", "other")
+BATCH_SIZE = 100  # comments per Gemini request (free keys allow ~20 requests/day)
 MIN_FOR_SHARE = 10  # fewer classified comments than this -> shares are null, not a guess
 EXAMPLES_PER_INTENT = 3
 CACHE_TTL_SECONDS = 60
@@ -71,12 +74,20 @@ def classify_pending(limit: int) -> int:
     classified = 0
     for i in range(0, len(pending), BATCH_SIZE):
         batch = pending[i : i + BATCH_SIZE]
-        lines = "\n".join(f"{n} | {text[:400].replace(chr(10), ' ')}" for n, (_, text) in enumerate(batch))
+        lines = "\n".join(f"{n} | {text[:300].replace(chr(10), ' ')}" for n, (_, text) in enumerate(batch))
         prompt = (
-            "أنت محلل جمهور لهيئة الإذاعة والتلفزيون السعودية. لكل تعليق من الجمهور على منشورات الهيئة، حدّد:\n"
-            '- "s": المشاعر تجاه المحتوى أو الجهة: "positive" أو "negative" أو "neutral"\n'
-            '- "i": نوع التعليق: "praise" (إشادة) أو "criticism" (انتقاد) أو "request" (طلب أو اقتراح محتوى) '
-            'أو "question" (سؤال) أو "other"\n'
+            "أنت محلل جمهور لهيئة الإذاعة والتلفزيون السعودية. هذه تعليقات الجمهور على منشورات قنوات الهيئة.\n"
+            "المطلوب قياس موقف الجمهور من الهيئة وقنواتها ومحتواها وتغطيتها ومذيعيها - وليس من الخبر أو الحدث نفسه.\n"
+            '- "s": المشاعر تجاه الهيئة/القناة/المحتوى/التغطية: "positive" أو "negative" أو "neutral". '
+            'إذا لم يتحدث التعليق عن الهيئة أو محتواها فهو "neutral".\n'
+            '- "i": نوع التعليق:\n'
+            '  "praise": مدح القناة أو البرنامج أو التغطية أو المذيع.\n'
+            '  "criticism": انتقاد القناة أو جودة التغطية أو المحتوى أو البث أو المذيع.\n'
+            '  "request": طلب أو اقتراح محتوى أو خدمة من القناة.\n'
+            '  "question": سؤال موجّه للقناة أو عن المحتوى.\n'
+            '  "reaction": تفاعل مع الحدث أو الخبر نفسه وليس مع القناة: دعاء، تعاطف، فرح أو غضب من الحدث، '
+            'رأي في الفرق أو التحكيم أو الأطراف. مثال: "الله ينتقم من المعتدين" أو "الحكم ظلم الهلال" = reaction و neutral.\n'
+            '  "other": إعلانات، أو كلام لا علاقة له.\n'
             "كل سطر بالشكل: رقم | نص التعليق.\n"
             f"{lines}\n"
             'أعد كائن JSON فقط يربط كل رقم بنتيجته، مثال: {"0": {"s": "positive", "i": "praise"}}'
@@ -96,6 +107,8 @@ def classify_pending(limit: int) -> int:
                 continue
             s, intent = label.get("s"), label.get("i")
             if s in SENTIMENTS and intent in INTENTS:  # anything else stays unclassified
+                if intent in SBA_NEUTRAL_INTENTS:
+                    s = "neutral"
                 updates.append({"cid": comment_id, "s": s, "i": intent, "at": now})
         if updates:
             with db.get_engine().begin() as conn:
