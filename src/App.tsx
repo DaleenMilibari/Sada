@@ -1,26 +1,27 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
-import DashboardView from './components/DashboardView';
-import OptimizerView from './components/OptimizerView';
-import BroadcastView from './components/BroadcastView';
 import LoginView from './components/LoginView';
 import Toast, { type ToastMessage } from './components/Toast';
-import type { ActiveView, NotificationItem } from './types';
-import { getToken, isAuthRequired, setToken, UNAUTHORIZED_EVENT } from './lib/api';
-import { Bell, Search, CheckCheck, X, AlertTriangle, Trophy, BarChart3, LogOut, Loader2 } from 'lucide-react';
+import type { ActiveView, CollectorStatus, NotificationItem } from './types';
+import { apiFetch, getToken, isAuthRequired, setToken, UNAUTHORIZED_EVENT } from './lib/api';
+import { Bell, CheckCheck, X, AlertTriangle, Trophy, BarChart3, LogOut, Loader2 } from 'lucide-react';
+
+const DashboardView = lazy(() => import('./components/DashboardView'));
+const OptimizerView = lazy(() => import('./components/OptimizerView'));
+const AlertsView = lazy(() => import('./components/BroadcastView'));
 
 const VIEW_TITLES: Record<ActiveView, { title: string; subtitle: string }> = {
   dashboard: {
-    title: 'لوحة التحكم والأنماط السلوكية',
-    subtitle: 'الوكيل الأول · تحليل سلوك الجمهور والمنصات',
+    title: 'لوحة التحليلات والأنماط',
+    subtitle: 'بيانات حقيقية من يوتيوب وإنستغرام · تحديث تلقائي كل دقيقة',
   },
   optimizer: {
     title: 'مُحسن ومختبر المحتوى',
     subtitle: 'الوكيل الثاني · اختبار المتغيرات وتحديد النسخة الفائزة',
   },
   broadcast: {
-    title: 'مراقب البث والتشخيص الذكي',
-    subtitle: 'الوكيل الثالث · رصد البث المباشر والتشخيص عبر RAG',
+    title: 'التنبيهات والتشخيص',
+    subtitle: 'رصد القفزات والانخفاضات وتشخيص أسبابها بالأدلة',
   },
 };
 
@@ -32,15 +33,75 @@ const VIEW_NOTIFICATION_TYPE: Record<ActiveView, NotificationItem['type']> = {
   broadcast: 'viral',
 };
 
+const STATUS_REFRESH_MS = 60_000;
+
+// Real collector state from /api/collector/status - not a decorative badge.
+function CollectorPill() {
+  const [status, setStatus] = useState<CollectorStatus | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const data = await apiFetch<CollectorStatus>('/api/collector/status');
+        if (alive) {
+          setStatus(data);
+          setFailed(false);
+        }
+      } catch {
+        if (alive) setFailed(true);
+      }
+    };
+    load();
+    const id = window.setInterval(load, STATUS_REFRESH_MS);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  const last = status?.runs[0];
+  let dot = 'bg-slate-400';
+  let label = 'جارٍ التحقق من الجامع...';
+  if (failed) {
+    dot = 'bg-red-500';
+    label = 'تعذر قراءة حالة الجامع';
+  } else if (status) {
+    if (!status.enabled) {
+      label = 'جمع البيانات متوقف (لا مفاتيح)';
+    } else if (last?.status === 'running') {
+      dot = 'bg-blue-500 animate-pulse';
+      label = 'جارٍ جمع البيانات...';
+    } else if (last?.status === 'failed') {
+      dot = 'bg-red-500';
+      label = 'آخر جمع فشل';
+    } else if (last?.status === 'partial') {
+      dot = 'bg-amber-500';
+      label = `جمع جزئي · ${status.total_videos.toLocaleString('en')} منشور`;
+    } else if (last) {
+      dot = 'bg-emerald-500';
+      label = `الجامع يعمل · ${status.total_videos.toLocaleString('en')} منشور`;
+    } else {
+      label = 'لم يعمل الجامع بعد';
+    }
+  }
+  return (
+    <div className="hidden sm:flex items-center gap-2 bg-slate-50 border border-slate-200/80 px-3 py-1.5 rounded-xl text-xs font-arabic" title={last?.error ?? undefined}>
+      <span className={`inline-flex rounded-full h-2 w-2 ${dot}`} />
+      <span className="font-bold text-slate-700">{label}</span>
+    </div>
+  );
+}
+
 interface TopBarProps {
   view: ActiveView;
-  onSearchClick: () => void;
   unreadCount: number;
   onToggleNotifications: () => void;
   onLogout?: () => void;
 }
 
-function TopBar({ view, onSearchClick, unreadCount, onToggleNotifications, onLogout }: TopBarProps) {
+function TopBar({ view, unreadCount, onToggleNotifications, onLogout }: TopBarProps) {
   const current = VIEW_TITLES[view];
 
   return (
@@ -63,26 +124,7 @@ function TopBar({ view, onSearchClick, unreadCount, onToggleNotifications, onLog
 
       {/* ── Left side in RTL: Live status + Quick search + Notifications ── */}
       <div className="flex items-center gap-3">
-        {/* Live Broadcast Pulse Pill */}
-        <div className="hidden sm:flex items-center gap-2 bg-slate-50 border border-slate-200/80 px-3 py-1.5 rounded-xl text-xs font-arabic">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600"></span>
-          </span>
-          <span className="font-bold text-slate-700">بث مباشر متصل</span>
-        </div>
-
-        {/* Search Input */}
-        <div className="relative hidden md:block">
-          <div className="flex items-center gap-2 bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-xl px-3.5 py-1.5 w-56 transition-colors">
-            <Search className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-            <input
-              type="text"
-              placeholder="بحث في الأنماط والبث..."
-              className="bg-transparent text-xs text-slate-700 placeholder:text-slate-400 font-arabic outline-none flex-1 text-right"
-            />
-          </div>
-        </div>
+        <CollectorPill />
 
         {/* Notifications Bell */}
         <div className="relative">
@@ -199,7 +241,6 @@ export default function App() {
       {/* ── Global TopBar ── */}
       <TopBar
         view={activeView}
-        onSearchClick={() => {}}
         unreadCount={unreadCount}
         onToggleNotifications={() => setIsNotificationsOpen(!isNotificationsOpen)}
         onLogout={authRequired ? handleLogout : undefined}
@@ -270,9 +311,11 @@ export default function App() {
       {/* ── Main View Container ── */}
       <main className="mr-64 pt-16 min-h-screen">
         <div className="p-7 max-w-[1440px] mx-auto">
-          {activeView === 'dashboard' && <DashboardView onNotify={showToast} />}
-          {activeView === 'optimizer' && <OptimizerView onNotify={showToast} />}
-          {activeView === 'broadcast' && <BroadcastView onNotify={showToast} />}
+          <Suspense fallback={<div className="flex justify-center py-24"><Loader2 className="w-6 h-6 text-emerald-600 animate-spin" /></div>}>
+            {activeView === 'dashboard' && <DashboardView onNotify={showToast} />}
+            {activeView === 'optimizer' && <OptimizerView onNotify={showToast} />}
+            {activeView === 'broadcast' && <AlertsView onNotify={showToast} />}
+          </Suspense>
         </div>
       </main>
 

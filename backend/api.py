@@ -19,9 +19,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException,
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from backend import auth, config, db, repository
+from backend import analytics, auth, config, db, repository
 from backend.agents import (
     behavior_analysis_agent,
+    anomaly_agent,
     content_optimizer_agent,
     data_collector_agent,
     diagnostic_recommendation_agent,
@@ -31,6 +32,9 @@ from backend.agents import (
 )
 from backend.rate_limit import limit_llm, limit_login
 from backend.schemas import (
+    Alert,
+    AnalyticsSummary,
+    VideoDiagnosisRequest,
     AwjDiagnosisRequest,
     BroadcastSignalPoint,
     BroadcastSnapshot,
@@ -260,6 +264,33 @@ def get_trending(
 @api.get("/model/accuracy", response_model=ModelAccuracy)
 def get_model_accuracy():
     return trend_prediction_agent.model_accuracy()
+
+
+# --- Task 3: Live dashboard & analytics ---
+
+
+@api.get("/analytics/summary", response_model=AnalyticsSummary)
+def get_analytics_summary(
+    days: int = Query(default=30, ge=1, le=365),
+    platform: Literal["youtube", "instagram"] | None = None,
+):
+    return analytics.summary(days, platform)
+
+
+# --- Task 4: Spikes, drops & root-cause diagnosis ---
+
+
+@api.get("/alerts", response_model=list[Alert])
+def get_alerts(days: int = Query(default=7, ge=1, le=60)):
+    return anomaly_agent.alerts(days)
+
+
+@api.post("/diagnose/video", response_model=DiagnosisResult, dependencies=[Depends(limit_llm)])
+def diagnose_video(req: VideoDiagnosisRequest):
+    result = diagnostic_recommendation_agent.diagnose_video(req.video_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    return result
 
 
 app.include_router(api)

@@ -33,8 +33,14 @@ class Pattern(BaseModel):
     # Both are descriptive-only - Tasks 2/3 never match against them since
     # drafts/items don't carry the attributes these dimensions describe,
     # they just ride along in the same store.
+    # "content_type_real" / "timing_real" / "topic_real" / "channel_topic_real" /
+    # "platform_content_real" come from real SBA YouTube + Instagram posts
+    # (backend.repository.analysis_records(), see analyze_real_data) scored on
+    # performance_index - the per-post-record counterpart to the dimensions
+    # above, usable by the optimizer the same way the synthetic ones are.
     dimension: Literal[
-        "content_type", "timing", "topic_platform", "platform_reach_real", "awj_sada_real"
+        "content_type", "timing", "topic_platform", "platform_reach_real", "awj_sada_real",
+        "content_type_real", "timing_real", "topic_real", "channel_topic_real", "platform_content_real",
     ]
     slice_key: str
     lift_pct: float
@@ -71,6 +77,10 @@ class DraftContent(BaseModel):
     # Optional writing tone (e.g. "تفاعلي" / "رسمي" / "إخباري") passed to the
     # LLM variant-generation prompt; ignored when `variants` is supplied.
     tone: str | None = Field(default=None, max_length=40)
+    # team.md Task 1 "on real data": optional SBA account entity_keys (see
+    # backend/sba_channels.py, GET /api/channels) to recommend a specific
+    # account from, additive only - when omitted, behavior is unchanged.
+    channel_options: list[str] = Field(default_factory=list)
 
 
 class RankedAlternative(BaseModel):
@@ -79,6 +89,8 @@ class RankedAlternative(BaseModel):
     time_window: str
     predicted_engagement: float
     evidence: list[str]
+    # Set only when the draft supplied channel_options.
+    channel: str | None = None
 
 
 class OptimizerEvidence(BaseModel):
@@ -95,6 +107,8 @@ class OptimizationResult(BaseModel):
     ranked_alternatives: list[RankedAlternative]
     evidence: list[OptimizerEvidence]
     low_confidence: bool = False
+    # Set only when the draft supplied channel_options (team.md Task 1 "on real data").
+    recommended_channel: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -303,3 +317,98 @@ class ModelAccuracy(BaseModel):
     top10_hit_rate: float | None = None  # 0-1
     beats_baseline: bool | None = None
     computed_at: datetime
+
+
+# --- Task 3 (team.md): Live dashboard & analytics ---
+
+
+class AnalyticsTotals(BaseModel):
+    posts: int
+    views: int  # YouTube only - Instagram exposes no views
+    likes: int
+    comments: int
+    engagement_rate: float | None = None  # (likes + comments) / views, YouTube posts only
+
+
+class PlatformStats(BaseModel):
+    platform: Literal["youtube", "instagram"]
+    accounts: int
+    posts: int
+    followers: int
+    likes: int
+    comments: int
+
+
+class ChannelStats(BaseModel):
+    platform: Literal["youtube", "instagram"]
+    entity_key: str
+    name_ar: str
+    subscriber_count: int | None = None
+    posts: int
+    views: int | None = None  # null on Instagram
+    median_performance_index: float
+    engagement_rate: float | None = None  # null on Instagram (no views)
+
+
+class ContentTypeStats(BaseModel):
+    platform: Literal["youtube", "instagram"]
+    content_type: str
+    posts: int
+    median_performance_index: float
+
+
+class TopicStats(BaseModel):
+    topic: str
+    label_ar: str
+    posts: int
+    median_performance_index: float
+
+
+class BestTimeCell(BaseModel):
+    platform: Literal["youtube", "instagram"]
+    day_of_week: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    hour: int  # Riyadh time, 0-23
+    median_performance_index: float
+    n: int
+
+
+class AnalyticsSummary(BaseModel):
+    generated_at: datetime
+    data_as_of: datetime | None = None  # finish time of the last successful collector run
+    days: int
+    platform: Literal["youtube", "instagram"] | None = None
+    # Posts younger than this are left out (not enough time to accumulate engagement).
+    min_post_age_days: float
+    totals: AnalyticsTotals
+    by_platform: list[PlatformStats]
+    by_channel: list[ChannelStats]
+    by_content_type: list[ContentTypeStats]
+    by_topic: list[TopicStats]
+    best_times: list[BestTimeCell]
+
+
+# --- Task 4 (team.md): Spikes, drops & root-cause diagnosis ---
+
+
+class Alert(BaseModel):
+    alert_id: str
+    kind: Literal["spike", "drop"]
+    video: VideoOut
+    metric: Literal["views", "interactions"]
+    # For detection "level": cumulative metric at the post's current age vs the account's typical value
+    # at the same age. For "velocity": metric per hour between the latest snapshots vs the previous ones.
+    observed: int
+    expected: int
+    ratio: float
+    severity: Literal["high", "medium"]
+    detected_at: datetime
+    # Additive fields:
+    detection: Literal["level", "velocity"] = "level"
+    # level: "same_age" (peers' snapshots at this age) | "plateau" (posts >= 7 days old vs peers' current value)
+    basis: Literal["same_age", "plateau", "snapshots"] = "same_age"
+    peers: int = 0  # comparable posts behind `expected`
+    explanation: str = ""
+
+
+class VideoDiagnosisRequest(BaseModel):
+    video_id: str

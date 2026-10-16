@@ -60,3 +60,73 @@ def test_optimize_true_fallback_with_empty_pattern_store():
     result = opt.optimize(draft, patterns=[])
     assert result["low_confidence"] is True
     assert result["recommended_variant"] == "نص بلا أي سياق"
+
+
+def test_optimize_without_channel_options_leaves_channel_fields_none(patterns):
+    # Backward compatibility: a draft with no channel_options (the shape every
+    # existing caller/test already uses) must behave exactly as before.
+    draft = {
+        "content_type": "video",
+        "topic": "national_event",
+        "platform_options": ["x"],
+        "variants": ["نص عادي"],
+    }
+    result = opt.optimize(draft, patterns)
+    assert result["recommended_channel"] is None
+    assert all(alt["channel"] is None for alt in result["ranked_alternatives"])
+
+
+def test_optimize_recommends_a_channel_from_channel_options():
+    # team.md Task 1 "on real data": a channel_topic_real pattern for one
+    # specific channel should steer the recommendation to that channel.
+    real_patterns = [
+        {
+            "pattern_id": "p1",
+            "pattern": "test",
+            "supporting_metric": "n=30",
+            "confidence": 0.9,
+            "affected_content_types": [],
+            "dimension": "channel_topic_real",
+            "slice_key": "riyadiya_tv|sports",
+            "lift_pct": 120.0,
+            "source": "real_youtube_sba",
+        }
+    ]
+    draft = {
+        "content_type": "video",
+        "topic": "sports",
+        "platform_options": ["youtube"],
+        "channel_options": ["riyadiya_tv", "other_channel"],
+        "variants": ["محتوى رياضي"],
+    }
+    result = opt.optimize(draft, real_patterns)
+    assert result["recommended_channel"] == "riyadiya_tv"
+    assert any(e["pattern_id"] == "p1" for e in result["evidence"])
+
+
+def test_optimize_uses_real_timing_windows_when_available():
+    # Only one real timing slot has evidence - the optimizer must restrict
+    # candidate time windows to it rather than trying all 4 hardcoded ones.
+    real_patterns = [
+        {
+            "pattern_id": "t1",
+            "pattern": "test",
+            "supporting_metric": "n=30",
+            "confidence": 0.8,
+            "affected_content_types": [],
+            "dimension": "timing_real",
+            "slice_key": "weekend",
+            "lift_pct": 50.0,
+            "source": "real_youtube_sba",
+        }
+    ]
+    draft = {
+        "content_type": "video",
+        "topic": "sports",
+        "platform_options": ["youtube"],
+        "variants": ["محتوى"],
+    }
+    result = opt.optimize(draft, real_patterns)
+    assert result["recommended_time"] == opt.TIME_WINDOWS["weekend"]
+    for alt in result["ranked_alternatives"]:
+        assert alt["time_window"] == opt.TIME_WINDOWS["weekend"]
