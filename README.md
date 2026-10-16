@@ -8,7 +8,7 @@ Sada is a multi-agent AI platform for the **Saudi Broadcasting Authority (SBA)**
 
 All agents share one database and one pattern store:
 
-1. **🛰️ Data Collector Agent:** collects real data every 30 minutes, through official APIs, from **9 official SBA YouTube channels** (~10.5M subscribers) and **SBA's Instagram accounts**. It keeps a stats time series for every post, within a fixed API quota budget.
+1. **🛰️ Data Collector Agent:** collects real data every 30 minutes, through official APIs, from **9 official SBA YouTube channels** (~10.5M subscribers), **SBA's Instagram accounts** and **SBA's X accounts**. It keeps a stats time series for every post, within a fixed API quota budget.
 2. **📊 Behavior Analysis Agent:** finds statistically significant engagement patterns by content type, topic, publish time and channel. Every pattern cites its sample size and test statistic.
 3. **🚀 Content Optimizer Agent:** generates caption variants with Gemini, scores them against the patterns, and recommends the winning version, channel and publish time.
 4. **🩺 Diagnostic & Recommendation Agent:** explains why a post over- or under-performed, grounded in comparable past content, with an evidence link for every factor.
@@ -24,7 +24,8 @@ Field contracts for each agent are in [AGENT_SPEC.md](AGENT_SPEC.md).
 |---|---|---|
 | 9 official SBA YouTube channels | **Real**, collected automatically every 30 min | ✅ Live: 2,901 videos / ~49M views in the first 60-day backfill |
 | Official SBA Instagram accounts | **Real**, collected automatically via Meta's Graph API | 🟡 Code ready; goes live after the Meta setup in [DATA_COLLECTION.md](DATA_COLLECTION.md) |
-| X, TikTok | Not collected: APIs need paid access or approval | Future work |
+| Official SBA X accounts | **Real**, via X API v2 (pay-per-use, hard-capped budget) | 🟡 Code ready; goes live once `X_BEARER_TOKEN` is set ([DATA_COLLECTION.md](DATA_COLLECTION.md) §5) |
+| TikTok | Not collected: API needs approval | Future work |
 | SBA Hajj 1445H media statistics | **Real**, SBA open data (season totals) | ✅ |
 | AWJ \| Sada podcast dataset | **Real**, curated | ✅ |
 | Engagement records, broadcast signal | Synthetic seed data (MVP) | Being replaced by real data |

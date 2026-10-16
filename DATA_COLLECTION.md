@@ -6,7 +6,8 @@ Sada collects **real SBA data automatically** from two platforms. Nobody copies 
 |---|---|---|
 | **YouTube**: 9 official SBA channels | YouTube Data API v3 (free) | ✅ Live: 2,901 videos, refreshed every 30 min |
 | **Instagram**: official SBA accounts | Meta Graph API "Business Discovery" (free) | 🟡 Code ready; needs the Meta setup in section 3 (≈1 h, one person) |
-| X, TikTok | Not collected | See section 5 |
+| X | Official SBA accounts' own posts, read once each, hard-capped budget | See section 5 |
+| TikTok | Not collected | See section 6 |
 
 Both feed the same database through the **Data Collector agent** (`backend/agents/data_collector_agent.py`), so every other agent sees YouTube videos and Instagram posts side by side (`platform` field).
 
@@ -143,16 +144,25 @@ Because Instagram has no public views, cross-platform comparisons use **`perform
 
 ---
 
-## 5. X and TikTok
+## 5. X (pay-per-use API, one teammate, ≈15 min)
 
-Not collected in this version:
+We read SBA's **public** posts with our own developer account's app-only bearer token. No SBA login or password is needed.
 
-- **X:** reading posts through the API needs a **paid** subscription, and the free tier can't read.
-- **TikTok:** its Research API needs an approval that takes weeks, and its other APIs only cover accounts that log in to our app.
+1. Sign in at **console.x.com** with any X account, create a project + app, add a payment card (new accounts get about $20 of free credit) and set a low auto-recharge / spending limit.
+2. Copy the app's **Bearer Token** into `backend/.env` (locally) or Render's env vars: `X_BEARER_TOKEN=...`
+3. Verify each extra SBA handle on x.com before adding it to `SBA_X_ACCOUNTS` in `backend/sba_channels.py`. Verified so far: `@SBAgovSA`, `@saudiatv`, `@alekhbariyatv`, `@riyadiyatv`.
+4. Run once: `python -m backend.agents.data_collector_agent --platform x`
 
-Even with SBA's permission to use the data, these are the only official routes, and the open-source scrapers that skip them are fragile and break the platforms' terms. If time or budget allows later, the cleanest options are:
+**Cost control (X bills ≈ $0.005 per post returned):**
+- Each post is read **once**. The first run backfills up to `X_MAX_POSTS_PER_ACCOUNT` (600) posts per account within the lookback window. Later runs only fetch posts newer than the newest one stored.
+- `X_TOTAL_POST_BUDGET` (6,000 ≈ $30) is a hard stop across all runs, counted from the posts already stored.
+- Reposts and replies are excluded. Account ids are looked up once and reused.
+- When the project ends, delete `X_BEARER_TOKEN`. The collected data stays in the database.
 
-- **Analytics exports from SBA's social team.** X Analytics and TikTok Studio both export per-post data, which is richer than any public API: reach and audience details.
-- **A paid X API key.** A collector would then be a new client next to `backend/agents/youtube_client.py`, storing into the same tables with `platform = "x"`.
+**What we store:** text, time, link, type (text / image / carousel / video), impressions (as `view_count`), likes, replies (as `comment_count`). Reposts and quotes are not stored. Metrics are as of collection time, since posts are not re-read.
 
-For the pitch: *"Sada collects YouTube and Instagram automatically through official APIs; X and TikTok plug into the same pipeline once API access is in place."*
+---
+
+## 6. TikTok
+
+Not collected: its Research API needs an approval that takes weeks, and its other APIs only cover accounts that log in to our app. SBA's TikTok Studio analytics export is the cleanest alternative.

@@ -123,9 +123,10 @@ def collector_status(run_limit: int = 10) -> dict[str, Any]:
             .where(db.collector_runs.c.started_at >= db.utcnow() - timedelta(hours=24))
         ).scalar()
         return {
-            "enabled": bool(config.YOUTUBE_API_KEY) or config.INSTAGRAM_ENABLED,
+            "enabled": bool(config.YOUTUBE_API_KEY) or config.INSTAGRAM_ENABLED or config.X_ENABLED,
             "youtube_enabled": bool(config.YOUTUBE_API_KEY),
             "instagram_enabled": config.INSTAGRAM_ENABLED,
+            "x_enabled": config.X_ENABLED,
             "instagram_calls_last_24h": int(ig_calls_24h or 0),
             "schedule_enabled": config.COLLECTOR_SCHEDULE_ENABLED,
             "interval_minutes": config.COLLECTOR_INTERVAL_MINUTES,
@@ -144,11 +145,11 @@ def analysis_records(days: int = 60, min_age_days: float = 3.0, platform: str | 
     Shared input for every analysis agent. Confounds removed up front so slices compare like with like:
     - Account size: `performance_index` = the post's primary metric / the median of the same
       platform + account + content_type (1.0 = typical for that account; 2.0 = twice its usual).
-      Primary metric: views on YouTube; likes + comments on Instagram (its API exposes no views).
+      Primary metric: views on YouTube; impressions on X; likes + comments on Instagram (its API exposes no views).
       **Compare slices - including across platforms - on performance_index, never on raw counts.**
     - `views_index` is the same value for YouTube only (None on Instagram).
     - Post age: posts younger than `min_age_days` are excluded - they haven't accumulated engagement yet.
-    `engagement_rate` = (likes + comments) / views - YouTube only (None without views or both counts).
+    `engagement_rate` = (likes + comments) / views - YouTube, and X with impressions as views (None without views or both counts).
     Time fields are Riyadh local time.
     """
     now = db.utcnow()
@@ -165,7 +166,7 @@ def analysis_records(days: int = 60, min_age_days: float = 3.0, platform: str | 
         rows = [_video_dict(r) | {"subscriber_count": r.subscriber_count} for r in conn.execute(stmt)]
 
     def primary(r: dict[str, Any]) -> int | None:
-        if r["platform"] == "youtube":
+        if r["platform"] in ("youtube", "x"):
             return r["view_count"]
         interactions = [x for x in (r["like_count"], r["comment_count"]) if x is not None]
         return sum(interactions) if interactions else None
@@ -173,7 +174,7 @@ def analysis_records(days: int = 60, min_age_days: float = 3.0, platform: str | 
     records = []
     groups: dict[tuple[str, str, str], list[int]] = {}
     for r in rows:
-        r["primary_metric"] = "views" if r["platform"] == "youtube" else "interactions"
+        r["primary_metric"] = {"youtube": "views", "x": "impressions"}.get(r["platform"], "interactions")
         r["primary_value"] = primary(r)
         if r["primary_value"] is None:
             continue  # nothing comparable was exposed for this post

@@ -25,10 +25,12 @@ def _isolated_database(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _no_real_api_keys(monkeypatch):
-    """backend/.env may hold real keys - tests must never reach YouTube/Instagram/Gemini for real."""
+    """backend/.env may hold real keys - tests must never reach YouTube/Instagram/X/Gemini for real."""
     from backend import config
 
     monkeypatch.setattr(config, "YOUTUBE_API_KEY", "")
     monkeypatch.setattr(config, "META_ACCESS_TOKEN", "")
     monkeypatch.setattr(config, "INSTAGRAM_BUSINESS_ACCOUNT_ID", "")
     monkeypatch.setattr(config, "INSTAGRAM_ENABLED", False)
+    monkeypatch.setattr(config, "X_BEARER_TOKEN", "")
+    monkeypatch.setattr(config, "X_ENABLED", False)

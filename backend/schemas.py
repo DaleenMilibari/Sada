@@ -195,7 +195,7 @@ class BroadcastSnapshot(BaseModel):
 
 class ChannelOut(BaseModel):
     channel_id: str
-    platform: Literal["youtube", "instagram"]
+    platform: Literal["youtube", "instagram", "x"]
     entity_key: str
     handle: str
     name_ar: str
@@ -211,7 +211,7 @@ class VideoOut(BaseModel):
     """A YouTube video or an Instagram post (see `platform`). `title` is the caption on Instagram."""
 
     video_id: str
-    platform: Literal["youtube", "instagram"]
+    platform: Literal["youtube", "instagram", "x"]
     channel_id: str
     entity_key: str
     channel_name_ar: str
@@ -219,7 +219,7 @@ class VideoOut(BaseModel):
     url: str
     published_at: datetime
     duration_seconds: int | None = None
-    content_type: Literal["short", "video", "live", "image", "carousel"]
+    content_type: Literal["short", "video", "live", "image", "carousel", "text"]
     topic: str
     topic_source: Literal["rule", "llm"]
     view_count: int | None = None
@@ -263,6 +263,7 @@ class CollectorStatus(BaseModel):
     enabled: bool
     youtube_enabled: bool
     instagram_enabled: bool
+    x_enabled: bool = False
     instagram_calls_last_24h: int
     schedule_enabled: bool
     interval_minutes: int

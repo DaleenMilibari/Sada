@@ -6,7 +6,7 @@
 - Input: The channel registry + what is already stored in the database.
 - Trigger: In-process scheduler every COLLECTOR_INTERVAL_MINUTES, the
   POST /api/collector/run endpoint, or the CLI (python -m backend.agents.data_collector_agent).
-- Tools: YouTube Data API v3 (youtube_client.py); Instagram Graph API Business
+- Tools: YouTube Data API v3 (youtube_client.py); X API v2 (x_client.py / x_collector.py); Instagram Graph API Business
   Discovery (instagram_client.py / instagram_collector.py); Gemini for topic refinement.
 - Data/context: The database (backend/db.py) - channels, videos, video_snapshots, collector_runs.
 - Reasoning task: Decide what is worth spending quota on. New uploads first,
@@ -37,8 +37,9 @@ from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.engine import Engine
 
 from backend import config, db
-from backend.agents import instagram_collector, llm_client
+from backend.agents import instagram_collector, llm_client, x_collector
 from backend.agents.instagram_client import InstagramClient, InstagramRateLimited
+from backend.agents.x_client import XClient, XRateLimited
 from backend.agents.youtube_client import QuotaExceeded, YouTubeClient, parse_duration
 from backend.sba_channels import SBA_CHANNELS
 from backend.topics import TOPICS, classify_by_rules
@@ -337,12 +338,13 @@ def run(
     *,
     client: YouTubeClient | None = None,
     instagram_client: InstagramClient | None = None,
+    x_client: XClient | None = None,
     engine: Engine | None = None,
     now: datetime | None = None,
     quota_budget: int | None = None,
     lookback_days: int | None = None,
     llm_classify_limit: int | None = None,
-    platforms: tuple[str, ...] = ("youtube", "instagram"),
+    platforms: tuple[str, ...] = ("youtube", "instagram", "x"),
 ) -> dict[str, Any]:
     engine = engine or db.get_engine()
     now = now or db.utcnow()
@@ -365,7 +367,7 @@ def run(
 
     summary = {
         "run_id": run_id, "status": "success", "new_videos": 0, "updated_videos": 0, "snapshots": 0,
-        "llm_classified": 0, "quota_units": 0, "instagram_calls": 0, "error": None,
+        "llm_classified": 0, "quota_units": 0, "instagram_calls": 0, "x_posts_read": 0, "error": None,
     }
     errors: list[str] = []
     partial = False
@@ -414,8 +416,36 @@ def run(
         finally:
             summary["instagram_calls"] = instagram_client.calls
 
+    # --- X --------------------------------------------------------------------
+    if "x" not in platforms:
+        x_client = None
+    elif x_client is None and config.X_ENABLED:
+        x_client = XClient(config.X_BEARER_TOKEN)
+    if x_client is not None:
+        sources_tried += 1
+        xr: dict[str, Any] = {"new": 0, "updated": 0, "errors": []}
+        try:
+            x_collector.collect(engine, x_client, now, cutoff, xr)
+            if xr["errors"]:
+                partial = True
+                errors.extend(xr["errors"])
+        except XRateLimited as e:
+            partial = True
+            errors.append(f"x: {e}")
+        except Exception as e:
+            logger.exception("X collection failed in run %s", run_id)
+            sources_failed += 1
+            errors.append(f"x: {type(e).__name__}: {e}")
+        finally:
+            summary["x_posts_read"] = x_client.posts_read
+            summary["new_videos"] += xr["new"]  # pages stored before an error still count
+            summary["updated_videos"] += xr["updated"]
+            summary["snapshots"] += xr["new"] + xr["updated"]
+
     if sources_tried == 0:
-        errors.append("No data source configured: set YOUTUBE_API_KEY and/or META_ACCESS_TOKEN + INSTAGRAM_BUSINESS_ACCOUNT_ID.")
+        errors.append(
+            "No data source configured: set YOUTUBE_API_KEY, META_ACCESS_TOKEN + INSTAGRAM_BUSINESS_ACCOUNT_ID, and/or X_BEARER_TOKEN."
+        )
     else:
         summary["llm_classified"] = _refine_topics_with_llm(engine, llm_limit)
 
@@ -451,13 +481,13 @@ if __name__ == "__main__":
     parser.add_argument("--budget", type=int, help="YouTube quota units this run may spend")
     parser.add_argument("--lookback", type=int, help="days of uploads to track")
     parser.add_argument("--llm-limit", type=int, help="videos to topic-classify with Gemini")
-    parser.add_argument("--platform", choices=["all", "youtube", "instagram"], default="all", help="which source(s) to collect")
+    parser.add_argument("--platform", choices=["all", "youtube", "instagram", "x"], default="all", help="which source(s) to collect")
     args = parser.parse_args()
     result = run(
         "cli",
         quota_budget=args.budget,
         lookback_days=args.lookback,
         llm_classify_limit=args.llm_limit,
-        platforms=("youtube", "instagram") if args.platform == "all" else (args.platform,),
+        platforms=("youtube", "instagram", "x") if args.platform == "all" else (args.platform,),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

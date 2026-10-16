@@ -32,3 +32,23 @@ BY_ENTITY = {c["entity_key"]: c for c in SBA_CHANNELS}
 SBA_INSTAGRAM_ACCOUNTS: list[dict[str, str]] = [
     {"entity_key": "saudiya", "username": "saudiyatv"},
 ]
+
+
+# Official SBA X accounts, read with our own app-only bearer token
+# (backend/agents/x_collector.py) - no SBA login needed.
+#
+# Verified: SBAgovSA (Wikidata, user id 2150846754); saudiatv, alekhbariyatv and
+# riyadiyatv (each X profile calls itself the official channel - team registry, 2026-10).
+# Verify any other handle on x.com before adding it: every account costs up to
+# X_MAX_POSTS_PER_ACCOUNT post reads on its first run, and its entity_key must
+# exist in SBA_CHANNELS. An unknown handle is skipped and reported in the run's error field.
+#
+# Candidates from the team registry, ownership not yet confirmed:
+#   sbc: SBC_Channel, quran_tv: quranchannel, sunnah_tv: sunnahchannel,
+#   thikrayat: Thikrayat_tv, quran_radio: QuranRadio_ksa
+SBA_X_ACCOUNTS: list[dict[str, str]] = [
+    {"entity_key": "sba", "username": "SBAgovSA"},
+    {"entity_key": "saudiya", "username": "saudiatv"},
+    {"entity_key": "ekhbariya", "username": "alekhbariyatv"},
+    {"entity_key": "riyadiya", "username": "riyadiyatv"},
+]

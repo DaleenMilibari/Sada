@@ -200,15 +200,15 @@ def get_broadcast_signal():
 
 
 @api.get("/channels", response_model=list[ChannelOut])
-def get_channels(platform: Literal["youtube", "instagram"] | None = None):
+def get_channels(platform: Literal["youtube", "instagram", "x"] | None = None):
     return repository.list_channels(platform)
 
 
 @api.get("/videos", response_model=VideoPage)
 def get_videos(
-    platform: Literal["youtube", "instagram"] | None = None,
+    platform: Literal["youtube", "instagram", "x"] | None = None,
     channel: str | None = Query(default=None, description="entity_key from backend/sba_channels.py"),
-    content_type: Literal["short", "video", "live", "image", "carousel"] | None = None,
+    content_type: Literal["short", "video", "live", "image", "carousel", "text"] | None = None,
     topic: str | None = None,
     days: int | None = Query(default=None, ge=1, le=365),
     sort: Literal["published", "views"] = "published",

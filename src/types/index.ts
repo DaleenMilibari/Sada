@@ -40,7 +40,7 @@ export interface NotificationItem {
 
 export interface VideoOut {
   video_id: string;
-  platform: 'youtube' | 'instagram';
+  platform: 'youtube' | 'instagram' | 'x';
   channel_id: string;
   entity_key: string;
   channel_name_ar: string;
@@ -48,7 +48,7 @@ export interface VideoOut {
   url: string;
   published_at: string;
   duration_seconds: number | null;
-  content_type: 'short' | 'video' | 'live' | 'image' | 'carousel';
+  content_type: 'short' | 'video' | 'live' | 'image' | 'carousel' | 'text';
   topic: string;
   topic_source: 'rule' | 'llm';
   view_count: number | null;

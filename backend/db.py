@@ -42,7 +42,7 @@ channels = Table(
     "channels",
     metadata,
     Column("channel_id", String(64), primary_key=True),
-    # "youtube" | "instagram"
+    # "youtube" | "instagram" | "x"
     Column("platform", String(16), nullable=False, default="youtube"),
     # Which SBA entity (backend/sba_channels.py) - unique per platform.
     Column("entity_key", String(40), nullable=False),
@@ -69,7 +69,7 @@ videos = Table(
     Column("url", String(300)),
     Column("published_at", DateTime(timezone=True), nullable=False, index=True),
     Column("duration_seconds", Integer),
-    # "short" | "video" | "live" | "image" | "carousel"
+    # "short" | "video" | "live" | "image" | "carousel" | "text" (X posts without media)
     Column("content_type", String(16), nullable=False),
     Column("topic", String(32), nullable=False),
     # "rule" | "llm"

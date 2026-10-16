@@ -66,6 +66,16 @@ INSTAGRAM_REFRESH_DAYS = int(os.environ.get("INSTAGRAM_REFRESH_DAYS", "7"))
 INSTAGRAM_MAX_PAGES_PER_ACCOUNT = int(os.environ.get("INSTAGRAM_MAX_PAGES_PER_ACCOUNT", "10"))
 INSTAGRAM_ENABLED = bool(META_ACCESS_TOKEN and INSTAGRAM_BUSINESS_ACCOUNT_ID)
 
+# --- Data Collector agent (X API v2, app-only bearer token) -------------------
+# Pay-per-use: ~$0.005 per post read. Each post is read once (see x_collector.py).
+X_BEARER_TOKEN = os.environ.get("X_BEARER_TOKEN", "")
+# Hard cap across ALL runs: 6,000 posts ~= $30. Counted from posts already stored.
+X_TOTAL_POST_BUDGET = int(os.environ.get("X_TOTAL_POST_BUDGET", "6000"))
+X_MAX_POSTS_PER_RUN = int(os.environ.get("X_MAX_POSTS_PER_RUN", "4000"))
+# First-run backfill depth per account (also capped by COLLECTOR_LOOKBACK_DAYS).
+X_MAX_POSTS_PER_ACCOUNT = int(os.environ.get("X_MAX_POSTS_PER_ACCOUNT", "600"))
+X_ENABLED = bool(X_BEARER_TOKEN)
+
 # In-process scheduler. Off by default so local reloads don't burn quota.
 COLLECTOR_SCHEDULE_ENABLED = os.environ.get("COLLECTOR_SCHEDULE_ENABLED", "false").lower() == "true"
 COLLECTOR_INTERVAL_MINUTES = int(os.environ.get("COLLECTOR_INTERVAL_MINUTES", "30"))
