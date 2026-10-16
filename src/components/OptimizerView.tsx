@@ -105,9 +105,11 @@ const LOADING_STEPS = [
   { step: 3, text: 'حساب التفاعل المتوقع وتحديد التوقيت الأمثل' },
 ];
 
-function formatLift(score: number): string {
+// Plain wording of the predicted result vs a typical post on the same accounts.
+function liftSentence(score: number): string {
   const lift = Math.round(score - BASELINE_SCORE);
-  return `${lift >= 0 ? '+' : ''}${lift}%`;
+  if (Math.abs(lift) < 5) return 'أداء متوقع مثل المعتاد';
+  return lift > 0 ? `أداء متوقع أعلى من المعتاد بـ ${lift}%` : `أداء متوقع أقل من المعتاد بـ ${Math.abs(lift)}%`;
 }
 
 export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewProps) {
@@ -195,7 +197,7 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
         res.recommended_platform;
       onNotify?.(
         'اكتمل توليد المتغيرات',
-        `النسخة الفائزة على ${winnerLabel} (${formatLift(res.predicted_engagement)} تفاعل متوقع)`,
+        `أفضل صياغة على ${winnerLabel}: ${liftSentence(res.predicted_engagement)}`,
         'success'
       );
     } catch (err) {
@@ -504,12 +506,22 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
                 </div>
               )}
 
+              {result.predicted_engagement < BASELINE_SCORE - 5 && (
+                <div className="flex items-start gap-2 p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <p className="text-xs font-arabic leading-relaxed">
+                    هذه أفضل صياغة بين المقترحات، لكن نوع المحتوى أو الموضوع أو التوقيت المختار يرتبط عادةً بأداء أقل من المعتاد
+                    لنفس الحسابات (انظر الأدلة أدناه). جرّب تغيير نوع المحتوى أو الموضوع لرفع الأداء المتوقع.
+                  </p>
+                </div>
+              )}
+
               {/* 1. Winner Variant Card */}
               <div className="bg-white border-2 border-emerald-600 rounded-2xl p-5 shadow-xs relative overflow-hidden">
                 <div className="flex items-center justify-between mb-3">
                   <span className="flex items-center gap-1.5 bg-emerald-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow-2xs font-arabic">
                     <Trophy className="w-3.5 h-3.5" />
-                    النسخة الفائزة ({formatLift(result.predicted_engagement)} تفاعل متوقع)
+                    أفضل صياغة · {liftSentence(result.predicted_engagement)}
                   </span>
 
                   <button
@@ -575,7 +587,7 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
                         نسخة بديلة {i + 1}
                       </span>
                       <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-arabic">
-                        {formatLift(alt.predicted_engagement)} تفاعل متوقع
+                        {liftSentence(alt.predicted_engagement)}
                       </span>
                       <span className="text-[11px] text-slate-400 font-arabic">
                         {channelName(alt.channel) ?? PLATFORM_LABELS[alt.platform] ?? alt.platform} · {alt.time_window}
