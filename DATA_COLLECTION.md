@@ -1,15 +1,16 @@
 # Data sources & API keys
 
-Sada collects **real SBA data automatically** from two platforms. Nobody copies numbers by hand.
+Sada collects **real SBA data automatically** through official APIs. Nobody copies numbers by hand.
 
 | Platform | How | Status |
 |---|---|---|
 | **YouTube**: 9 official SBA channels | YouTube Data API v3 (free) | ✅ Live: 2,901 videos, refreshed every 30 min |
+| **X**: 4 verified SBA accounts | X API v2, pay-per-use with a hard budget | ✅ Collector built; runs wherever `X_BEARER_TOKEN` is set (section 5) |
 | **Instagram**: official SBA accounts | Meta Graph API "Business Discovery" (free) | 🟡 Code ready; needs the Meta setup in section 3 (≈1 h, one person) |
-| X | Official SBA accounts' own posts, read once each, hard-capped budget | See section 5 |
-| TikTok | Not collected | See section 6 |
+| **Audience comments**: YouTube + X | Same APIs, same run | ✅ See section 6 |
+| TikTok | Not collected | See section 7 |
 
-Both feed the same database through the **Data Collector agent** (`backend/agents/data_collector_agent.py`), so every other agent sees YouTube videos and Instagram posts side by side (`platform` field).
+All of it feeds one database through the **Data Collector agent** (`backend/agents/data_collector_agent.py`), so every other agent sees YouTube videos, X posts and Instagram posts side by side (`platform` field).
 
 ---
 
@@ -24,7 +25,8 @@ Both feed the same database through the **Data Collector agent** (`backend/agent
 |---|---|---|
 | `GEMINI_API_KEY` | **Everyone**, their own | own `backend/.env`; the lead's also goes on Render |
 | `YOUTUBE_API_KEY` | **Lead only** (already done) | lead's `backend/.env` + Render |
-| `META_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ACCOUNT_ID` | **One teammate** (assigned in [team.md](team.md)) | sent privately to the lead → Render |
+| `META_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ACCOUNT_ID` | **One teammate** | sent privately to the lead → Render |
+| `X_BEARER_TOKEN` | **Lead only** | lead's `backend/.env` + Render |
 
 ---
 
@@ -144,7 +146,7 @@ Because Instagram has no public views, cross-platform comparisons use **`perform
 
 ---
 
-## 5. X (pay-per-use API, one teammate, ≈15 min)
+## 5. X (pay-per-use API, lead, ≈15 min)
 
 We read SBA's **public** posts with our own developer account's app-only bearer token. No SBA login or password is needed.
 
@@ -163,6 +165,22 @@ We read SBA's **public** posts with our own developer account's app-only bearer 
 
 ---
 
-## 6. TikTok
+## 6. Audience comments (YouTube + X)
+
+The collector's audience step (`backend/agents/audience_collector.py`) gathers what people say about SBA posts. The Audience agent then classifies it with Gemini (sentiment + intent).
+
+| Source | What is read | Cost |
+|---|---|---|
+| YouTube | Top comments (up to `AUDIENCE_YT_COMMENTS_PER_VIDEO`, 100) for the `AUDIENCE_YT_VIDEOS_PER_RUN` (3) most-viewed videos per account published 1–7 days ago | 1 quota unit per video |
+| X | Up to `X_REPLIES_PER_POST` (20) replies to the `AUDIENCE_X_POSTS_PER_RUN` (10) most-seen posts per account from the last ~7 days | ≈ $0.005 per reply; `X_REPLY_BUDGET` (1,000 ≈ $5) is a hard stop across all runs |
+
+- **Privacy:** only the comment text, time and like count are stored. **No author name, handle or id**, so the analysis is about the audience as a whole, never about individuals.
+- Each post's comments are read once.
+- Up to `AUDIENCE_LLM_CLASSIFY_PER_RUN` (200) comments are classified per run. Without a Gemini key they stay unclassified, and are never counted as neutral.
+- Follower counts are snapshotted too (YouTube every 6 h, Instagram every run, X daily), so growth can be measured.
+
+---
+
+## 7. TikTok
 
 Not collected: its Research API needs an approval that takes weeks, and its other APIs only cover accounts that log in to our app. SBA's TikTok Studio analytics export is the cleanest alternative.
