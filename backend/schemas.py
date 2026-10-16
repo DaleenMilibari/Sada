@@ -324,14 +324,14 @@ class ModelAccuracy(BaseModel):
 
 class AnalyticsTotals(BaseModel):
     posts: int
-    views: int  # YouTube only - Instagram exposes no views
+    views: int  # YouTube views; X impressions when filtered to X. Instagram exposes no views
     likes: int
     comments: int
-    engagement_rate: float | None = None  # (likes + comments) / views, YouTube posts only
+    engagement_rate: float | None = None  # (likes + comments) / views (YouTube; X impressions when filtered to X)
 
 
 class PlatformStats(BaseModel):
-    platform: Literal["youtube", "instagram"]
+    platform: Literal["youtube", "instagram", "x"]
     accounts: int
     posts: int
     followers: int
@@ -340,18 +340,18 @@ class PlatformStats(BaseModel):
 
 
 class ChannelStats(BaseModel):
-    platform: Literal["youtube", "instagram"]
+    platform: Literal["youtube", "instagram", "x"]
     entity_key: str
     name_ar: str
     subscriber_count: int | None = None
     posts: int
-    views: int | None = None  # null on Instagram
+    views: int | None = None  # YouTube views, X impressions, null on Instagram
     median_performance_index: float
-    engagement_rate: float | None = None  # null on Instagram (no views)
+    engagement_rate: float | None = None  # null on Instagram (no views); per impression on X
 
 
 class ContentTypeStats(BaseModel):
-    platform: Literal["youtube", "instagram"]
+    platform: Literal["youtube", "instagram", "x"]
     content_type: str
     posts: int
     median_performance_index: float
@@ -365,7 +365,7 @@ class TopicStats(BaseModel):
 
 
 class BestTimeCell(BaseModel):
-    platform: Literal["youtube", "instagram"]
+    platform: Literal["youtube", "instagram", "x"]
     day_of_week: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
     hour: int  # Riyadh time, 0-23
     median_performance_index: float
@@ -376,7 +376,7 @@ class AnalyticsSummary(BaseModel):
     generated_at: datetime
     data_as_of: datetime | None = None  # finish time of the last successful collector run
     days: int
-    platform: Literal["youtube", "instagram"] | None = None
+    platform: Literal["youtube", "instagram", "x"] | None = None
     # Posts younger than this are left out (not enough time to accumulate engagement).
     min_post_age_days: float
     totals: AnalyticsTotals

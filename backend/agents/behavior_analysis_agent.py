@@ -140,7 +140,7 @@ def _slice_pattern(
     return patterns
 
 
-PLATFORM_LABELS_AR = {"youtube": "يوتيوب", "instagram": "إنستغرام"}
+PLATFORM_LABELS_AR = {"youtube": "يوتيوب", "instagram": "إنستغرام", "x": "إكس"}
 
 
 def hour_bucket(day_of_week: str, hour: int) -> str:
@@ -226,7 +226,7 @@ def analyze_real_data(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     all_patterns: list[dict[str, Any]] = []
 
-    for platform in ("youtube", "instagram"):
+    for platform in ("youtube", "instagram", "x"):
         platform_records = [r for r in records if r["platform"] == platform]
         if not platform_records:
             continue

@@ -399,7 +399,7 @@ _FEATURE_LABELS = {
 
 
 def _primary_value(p: dict[str, Any]) -> int | None:
-    if p["platform"] == "youtube":
+    if p["platform"] in ("youtube", "x"):  # X: impressions
         return p["view_count"]
     parts = [x for x in (p["like_count"], p["comment_count"]) if x is not None]
     return sum(parts) if parts else None
@@ -424,6 +424,17 @@ def _engagement_rate(p: dict[str, Any]) -> float | None:
     return sum(parts) / p["view_count"] if parts and p.get("view_count") else None
 
 
+# X posts are read once and never refreshed: counts captured this young are still growing,
+# so they can't be compared with posts measured later.
+MIN_MEASURED_DAYS_X = 3
+
+
+def _measured_too_young(p: dict[str, Any]) -> bool:
+    if p["platform"] != "x" or p["stats_updated_at"] is None:
+        return False
+    return p["stats_updated_at"] - p["published_at"] < timedelta(days=MIN_MEASURED_DAYS_X)
+
+
 def _load_comparables(post: dict[str, Any], same_topic: bool) -> list[dict[str, Any]]:
     v, c = db.videos.c, db.channels.c
     stmt = (
@@ -438,7 +449,7 @@ def _load_comparables(post: dict[str, Any], same_topic: bool) -> list[dict[str, 
         stmt = stmt.where(v.topic == post["topic"])
     with db.get_engine().connect() as conn:
         rows = [repository._video_dict(r) for r in conn.execute(stmt)]
-    return [r for r in rows if _primary_value(r) is not None]
+    return [r for r in rows if _primary_value(r) is not None and not _measured_too_young(r)]
 
 
 def _fmt(n: float) -> str:
@@ -449,7 +460,7 @@ def build_video_diagnosis_context(post: dict[str, Any]) -> dict[str, Any]:
     """Deterministic retrieval + factor construction. No LLM, no invented numbers."""
     empty = {"post": post, "comparable": [], "basis": "none", "factors": [], "direction": None, "ratio": None, "low_confidence": True}
     value = _primary_value(post)
-    if value is None:
+    if value is None or _measured_too_young(post):
         return empty
 
     basis = "topic"
@@ -465,7 +476,7 @@ def build_video_diagnosis_context(post: dict[str, Any]) -> dict[str, Any]:
         return empty
     ratio = value / median
     direction = "under" if ratio < UNDER else "over" if ratio > OVER else "in_line"
-    metric_ar = "المشاهدات" if post["platform"] == "youtube" else "التفاعل (إعجابات + تعليقات)"
+    metric_ar = {"youtube": "المشاهدات", "x": "مرات الظهور"}.get(post["platform"], "التفاعل (إعجابات + تعليقات)")
     ranked = sorted(comparable, key=_primary_value, reverse=True)
     half = max(1, len(ranked) // 2)
     top, bottom = ranked[:half], ranked[-half:]
@@ -539,7 +550,7 @@ def build_video_diagnosis_context(post: dict[str, Any]) -> dict[str, Any]:
                 "recommendation": f"{'أضف' if majority else 'تجنّب'} {label} في عناوين المحتوى المشابه." if fix else None,
             })
 
-        if post["platform"] == "youtube":
+        if post["platform"] in ("youtube", "x"):
             my_er = _engagement_rate(post)
             ers = [e for e in (_engagement_rate(c) for c in comparable) if e is not None]
             if my_er is not None and len(ers) >= MIN_REAL_COMPARABLES:

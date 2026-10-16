@@ -52,11 +52,16 @@ def _sum(values) -> int:
     return int(sum(v for v in values if v is not None))  # null (hidden) is never treated as 0
 
 
-def _engagement_rate(records: list[dict[str, Any]]) -> float | None:
-    """(likes + comments) / views, over YouTube posts that expose views and at least one of the counts."""
+# Platforms whose view_count is a reach metric: YouTube views, X impressions (Instagram exposes none).
+# They measure different things, so they are summed or rated together only within one platform.
+VIEW_PLATFORMS = ("youtube", "x")
+
+
+def _engagement_rate(records: list[dict[str, Any]], platform: str = "youtube") -> float | None:
+    """(likes + comments) / views, over `platform` posts that expose views and at least one of the counts."""
     likes = comments = views = 0
     for r in records:
-        if r["platform"] != "youtube" or not r["view_count"]:
+        if r["platform"] != platform or not r["view_count"]:
             continue
         if r["like_count"] is None and r["comment_count"] is None:
             continue
@@ -68,6 +73,7 @@ def _engagement_rate(records: list[dict[str, Any]]) -> float | None:
 
 def build_summary(days: int = 30, platform: str | None = None) -> dict[str, Any]:
     records = repository.analysis_records(days=days, min_age_days=MIN_POST_AGE_DAYS, platform=platform)
+    views_platform = platform if platform in VIEW_PLATFORMS else "youtube"  # "all": YouTube views only
     channels = repository.list_channels(platform)
 
     by_platform = []
@@ -96,9 +102,9 @@ def build_summary(days: int = 30, platform: str | None = None) -> dict[str, Any]
             "name_ar": rows[0]["channel_name_ar"],
             "subscriber_count": channel.get("subscriber_count"),
             "posts": len(rows),
-            "views": _sum(r["view_count"] for r in rows) if p == "youtube" else None,
+            "views": _sum(r["view_count"] for r in rows) if p in VIEW_PLATFORMS else None,
             "median_performance_index": _median([r["performance_index"] for r in rows]),
-            "engagement_rate": _engagement_rate(rows),
+            "engagement_rate": _engagement_rate(rows, p),
         })
     by_channel.sort(key=lambda c: c["median_performance_index"], reverse=True)
 
@@ -118,10 +124,10 @@ def build_summary(days: int = 30, platform: str | None = None) -> dict[str, Any]
         "min_post_age_days": MIN_POST_AGE_DAYS,
         "totals": {
             "posts": len(records),
-            "views": _sum(r["view_count"] for r in records if r["platform"] == "youtube"),
+            "views": _sum(r["view_count"] for r in records if r["platform"] == views_platform),
             "likes": _sum(r["like_count"] for r in records),
             "comments": _sum(r["comment_count"] for r in records),
-            "engagement_rate": _engagement_rate(records),
+            "engagement_rate": _engagement_rate(records, views_platform),
         },
         "by_platform": by_platform,
         "by_channel": by_channel,

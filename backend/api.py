@@ -272,7 +272,7 @@ def get_model_accuracy():
 @api.get("/analytics/summary", response_model=AnalyticsSummary)
 def get_analytics_summary(
     days: int = Query(default=30, ge=1, le=365),
-    platform: Literal["youtube", "instagram"] | None = None,
+    platform: Literal["youtube", "instagram", "x"] | None = None,
 ):
     return analytics.summary(days, platform)
 

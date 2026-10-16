@@ -14,7 +14,7 @@ interface AlertsPanelProps {
   onSelect?: (alert: Alert) => void;
 }
 
-const PLATFORM_LABEL = { youtube: 'يوتيوب', instagram: 'إنستغرام' } as const;
+const PLATFORM_LABEL = { youtube: 'يوتيوب', instagram: 'إنستغرام', x: 'إكس' } as const;
 
 // Spikes (green) and drops (red) detected on real SBA posts (Task 4). Fetches its own data.
 export default function AlertsPanel({ compact: isCompact = false, days = isCompact ? 7 : 30, selectedId, onSelect }: AlertsPanelProps) {

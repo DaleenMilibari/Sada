@@ -245,3 +245,48 @@ def test_bad_ids_and_usernames_rejected_before_any_call(fake):
     with pytest.raises(XApiError):
         client.user_posts("100/../x", 10)
     assert fake.requests == []
+
+
+# --- X through the analysis layer (dashboard summary, diagnosis) ---
+
+
+def _collect_at(fake, collected_at, posts):
+    """Collect `posts` [(id, age at collection, impressions)] for @SBAgovSA at `collected_at`."""
+    _both_accounts(fake)
+    for post_id, age, impressions in posts:
+        fake.add_post("100", post_id, age + (NOW - collected_at), impressions=impressions)
+    collector.run("cli", x_client=_client(fake), engine=db.get_engine(), now=collected_at,
+                  lookback_days=60, llm_classify_limit=0, platforms=("x",))
+
+
+def test_x_in_dashboard_summary_uses_impressions_but_never_mixes_them_with_youtube_views(fake):
+    from backend import analytics, schemas
+
+    _collect_at(fake, db.utcnow(), [("1", timedelta(days=5), 1000), ("2", timedelta(days=6), 3000)])
+
+    x_only = analytics.build_summary(days=30, platform="x")
+    everything = analytics.build_summary(days=30)
+
+    schemas.AnalyticsSummary.model_validate(x_only)  # platform "x" passes the response model
+    schemas.AnalyticsSummary.model_validate(everything)
+    assert x_only["totals"]["views"] == 4000 and x_only["by_channel"][0]["views"] == 4000
+    assert x_only["totals"]["engagement_rate"] is not None
+    assert everything["totals"]["views"] == 0  # "all" totals stay YouTube views only
+
+
+def test_x_posts_measured_too_young_stay_out_of_analysis(fake):
+    collected = db.utcnow() - timedelta(days=5)
+    # Both published >3 days ago today, but 901 was only 1h old when its counts were frozen.
+    _collect_at(fake, collected, [("901", timedelta(hours=1), 50), ("902", timedelta(days=4), 5000)])
+
+    ids = {r["video_id"] for r in repository.analysis_records(platform="x")}
+    assert ids == {"902"}  # 901 was 1h old when measured
+
+
+def test_x_diagnosis_refuses_counts_frozen_too_young(fake):
+    from backend.agents import diagnostic_recommendation_agent as diag
+
+    _collect_at(fake, db.utcnow(), [("903", timedelta(hours=2), 50)])
+    post = repository.get_video("903")
+
+    assert diag.build_video_diagnosis_context(post)["low_confidence"] is True

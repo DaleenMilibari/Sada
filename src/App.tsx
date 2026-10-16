@@ -13,7 +13,7 @@ const AlertsView = lazy(() => import('./components/BroadcastView'));
 const VIEW_TITLES: Record<ActiveView, { title: string; subtitle: string }> = {
   dashboard: {
     title: 'لوحة التحليلات والأنماط',
-    subtitle: 'بيانات حقيقية من يوتيوب وإنستغرام · تحديث تلقائي كل دقيقة',
+    subtitle: 'بيانات حقيقية من يوتيوب وإنستغرام وإكس · تحديث تلقائي كل دقيقة',
   },
   optimizer: {
     title: 'مُحسن ومختبر المحتوى',

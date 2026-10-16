@@ -100,11 +100,12 @@ const PLATFORM_TABS: { key: Platform | 'all'; label: string }[] = [
   { key: 'all', label: 'الكل' },
   { key: 'youtube', label: 'يوتيوب' },
   { key: 'instagram', label: 'إنستغرام' },
+  { key: 'x', label: 'إكس' },
 ];
-const PLATFORM_LABEL: Record<Platform, string> = { youtube: 'يوتيوب', instagram: 'إنستغرام' };
-const PLATFORM_COLOR: Record<Platform, string> = { youtube: '#ef4444', instagram: '#db2777' };
+const PLATFORM_LABEL: Record<Platform, string> = { youtube: 'يوتيوب', instagram: 'إنستغرام', x: 'إكس' };
+const PLATFORM_COLOR: Record<Platform, string> = { youtube: '#ef4444', instagram: '#db2777', x: '#0f172a' };
 const CONTENT_TYPE_LABEL: Record<string, string> = {
-  short: 'مقطع قصير', video: 'فيديو', live: 'بث مباشر', image: 'صورة', carousel: 'ألبوم',
+  short: 'مقطع قصير', video: 'فيديو', live: 'بث مباشر', image: 'صورة', carousel: 'ألبوم', text: 'نص',
 };
 // Sunday-first week, as used in Saudi Arabia.
 const DAYS: { key: string; label: string }[] = [
@@ -373,16 +374,16 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
             <Kpi icon={<Video className="w-5 h-5" />} label="عدد المنشورات" value={summary.totals.posts.toLocaleString('en')} />
             <Kpi
               icon={<Eye className="w-5 h-5" />}
-              label="المشاهدات"
+              label={platform === 'x' ? 'مرات الظهور' : 'المشاهدات'}
               value={platform === 'instagram' ? '—' : compact.format(summary.totals.views)}
-              hint={platform === 'instagram' ? 'غير متاحة على إنستغرام' : 'يوتيوب فقط'}
+              hint={platform === 'instagram' ? 'غير متاحة على إنستغرام' : platform === 'x' ? 'إكس فقط' : 'يوتيوب فقط'}
             />
             <Kpi icon={<Users className="w-5 h-5" />} label="الإعجابات + التعليقات" value={compact.format(summary.totals.likes + summary.totals.comments)} />
             <Kpi
               icon={<Zap className="w-5 h-5" />}
               label="معدل التفاعل"
               value={summary.totals.engagement_rate === null ? '—' : percent.format(summary.totals.engagement_rate)}
-              hint="(إعجابات + تعليقات) ÷ مشاهدات"
+              hint={platform === 'x' ? '(إعجابات + ردود) ÷ مرات الظهور' : '(إعجابات + تعليقات) ÷ مشاهدات'}
             />
           </div>
 

@@ -82,7 +82,7 @@ export interface ModelAccuracy {
 
 // --- Task 3: Live dashboard & analytics (mirrors backend/schemas.py) ---
 
-export type Platform = 'youtube' | 'instagram';
+export type Platform = 'youtube' | 'instagram' | 'x';
 
 export interface AnalyticsSummary {
   generated_at: string;

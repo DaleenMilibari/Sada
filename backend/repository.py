@@ -148,7 +148,8 @@ def analysis_records(days: int = 60, min_age_days: float = 3.0, platform: str | 
       Primary metric: views on YouTube; impressions on X; likes + comments on Instagram (its API exposes no views).
       **Compare slices - including across platforms - on performance_index, never on raw counts.**
     - `views_index` is the same value for YouTube only (None on Instagram).
-    - Post age: posts younger than `min_age_days` are excluded - they haven't accumulated engagement yet.
+    - Post age: posts younger than `min_age_days` when their stats were last measured are excluded -
+      they hadn't accumulated engagement yet (matters for X, whose posts are never re-read).
     `engagement_rate` = (likes + comments) / views - YouTube, and X with impressions as views (None without views or both counts).
     Time fields are Riyadh local time.
     """
@@ -164,6 +165,10 @@ def analysis_records(days: int = 60, min_age_days: float = 3.0, platform: str | 
         stmt = stmt.where(v.platform == platform)
     with db.get_engine().connect() as conn:
         rows = [_video_dict(r) | {"subscriber_count": r.subscriber_count} for r in conn.execute(stmt)]
+    # Age at measurement, not today: X posts are read once and never refreshed, so a post
+    # collected an hour after publishing keeps hour-old counts forever and must stay out.
+    min_measured = timedelta(days=min_age_days)
+    rows = [r for r in rows if (r["stats_updated_at"] or now) - r["published_at"] >= min_measured]
 
     def primary(r: dict[str, Any]) -> int | None:
         if r["platform"] in ("youtube", "x"):

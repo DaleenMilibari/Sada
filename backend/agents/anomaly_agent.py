@@ -53,11 +53,11 @@ def clear_cache() -> None:
 
 
 def _metric(platform: str) -> str:
-    return "views" if platform == "youtube" else "interactions"
+    return "views" if platform in ("youtube", "x") else "interactions"  # X: impressions
 
 
 def _primary(platform: str, views, likes, comments) -> int | None:
-    if platform == "youtube":
+    if platform in ("youtube", "x"):
         return views
     parts = [x for x in (likes, comments) if x is not None]
     return sum(parts) if parts else None
@@ -197,7 +197,7 @@ def detect(days: int = 7, now: datetime | None = None) -> list[dict[str, Any]]:
             ratio = observed / expected
             kind = _classify(ratio)
             if kind:
-                what = "المشاهدات" if metric == "views" else "التفاعل (إعجابات + تعليقات)"
+                what = {"youtube": "المشاهدات", "x": "مرات الظهور"}.get(post["platform"], "التفاعل (إعجابات + تعليقات)")
                 where = "عند نفس العمر" if basis == "same_age" else "لمنشورات بعمر ٧ أيام فأكثر"
                 alerts.append(_alert(
                     post, kind, metric, observed, expected, ratio, "level", basis, n, detected_at,
@@ -219,7 +219,7 @@ def detect(days: int = 7, now: datetime | None = None) -> list[dict[str, Any]]:
                         verb = "تسارع" if kind == "spike" else "تباطأ"
                         alerts.append(_alert(
                             post, kind, metric, recent, prev, ratio, "velocity", "snapshots", len(pts), detected_at,
-                            f"{verb} نمو {'المشاهدات' if metric == 'views' else 'التفاعل'} فجأة: "
+                            f"{verb} نمو {'مرات الظهور' if post['platform'] == 'x' else 'المشاهدات' if metric == 'views' else 'التفاعل'} فجأة: "
                             f"{recent:,.1f}/ساعة بعد {prev:,.1f}/ساعة في القياس السابق ({ratio:.1f}×).",
                         ))
 

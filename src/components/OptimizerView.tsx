@@ -39,7 +39,7 @@ interface OptimizationResult {
 // Mirrors backend/schemas.py::ChannelOut.
 interface ChannelOut {
   channel_id: string;
-  platform: 'youtube' | 'instagram';
+  platform: 'youtube' | 'instagram' | 'x';
   entity_key: string;
   handle: string;
   name_ar: string;
