@@ -533,15 +533,18 @@ def upsert_store(new_patterns: list[dict[str, Any]], store_path: Path = STORE_PA
 
 
 def run(
-    dataset_path: Path = DATA_PATH,
     store_path: Path = STORE_PATH,
     real_data_path: Path = REAL_DATA_PATH,
     awj_real_data_path: Path = AWJ_REAL_DATA_PATH,
     real_sba_records: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Rebuild the pattern store. Real SBA patterns come first (team.md Task 1:
-    "Keep the synthetic and Hajj patterns, but real ones must come first"),
-    then the synthetic seed, then the Hajj/AWJ season-level sources.
+    """Rebuild the pattern store from real data only: SBA's collected posts first,
+    then the Hajj 1445 and AWJ | Sada season-level sources. The synthetic MVP seed
+    (DATA_PATH, analyze()) is no longer published - the dashboard and the
+    optimizer must only ever show real numbers (team.md "Real numbers only").
+
+    The store is replaced, not merged: a pattern that stops being significant on
+    fresh data disappears instead of lingering from an older run.
 
     `real_sba_records` is backend.repository.analysis_records() output - pass
     it explicitly from tests against a seeded database. When omitted, this
@@ -561,9 +564,6 @@ def run(
             real_sba_records = []
     patterns += analyze_real_data(real_sba_records)
 
-    records = _load_records(dataset_path)
-    patterns += analyze(records)
-
     real_totals = _load_real_hajj_totals(real_data_path)
     if real_totals:
         patterns += analyze_real_hajj_platforms(real_totals)
@@ -572,7 +572,9 @@ def run(
     if awj_real:
         patterns += analyze_real_awj_sada(awj_real)
 
-    return upsert_store(patterns, store_path)
+    unique = list({p["pattern_id"]: p for p in patterns}.values())
+    _write_store(store_path, unique)
+    return unique
 
 
 if __name__ == "__main__":

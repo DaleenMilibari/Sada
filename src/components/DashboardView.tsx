@@ -86,12 +86,23 @@ const DIMENSION_META: Record<ApiPattern['dimension'], { label: string; icon: Rea
   },
 };
 
-const CATEGORY_TABS: { key: 'all' | 'content_type' | 'timing' | 'topic_platform' | 'real'; label: string }[] = [
-  { key: 'all', label: 'الكل' },
-  { key: 'content_type', label: 'نوع المحتوى' },
-  { key: 'timing', label: 'توقيت' },
-  { key: 'topic_platform', label: 'الموضوع والمنصة' },
-  { key: 'real', label: 'بيانات حقيقية' },
+// Where each real pattern's numbers come from (backend behavior_analysis_agent `source`).
+const SOURCE_LABEL: Record<string, string> = {
+  real_youtube_sba: 'يوتيوب الهيئة',
+  real_instagram_sba: 'إنستغرام الهيئة',
+  real_x_sba: 'إكس الهيئة',
+  real_sba: 'مقارنة بين المنصات',
+  real_hajj_1445_sba: 'إحصاءات حج ١٤٤٥هـ',
+  real_awj_sada: 'أوج | صدى',
+};
+
+// Every pattern served by /api/patterns is computed from real data, so tabs group by what it describes.
+const CATEGORY_TABS: { key: 'all' | 'content_type' | 'timing' | 'topic' | 'platform'; label: string; dims: string[] }[] = [
+  { key: 'all', label: 'الكل', dims: [] },
+  { key: 'content_type', label: 'نوع المحتوى', dims: ['content_type_real', 'platform_content_real'] },
+  { key: 'timing', label: 'توقيت', dims: ['timing_real'] },
+  { key: 'topic', label: 'الموضوع والحساب', dims: ['topic_real', 'channel_topic_real', 'awj_sada_real'] },
+  { key: 'platform', label: 'المنصات', dims: ['platform_reach_real'] },
 ];
 
 const REFRESH_MS = 60_000;
@@ -298,9 +309,9 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
   }, []);
 
   const filteredPatterns = patterns.filter((p) => {
+    if (!p.source.startsWith('real_')) return false; // never show synthetic/demo patterns
     if (activeCategory === 'all') return true;
-    if (activeCategory === 'real') return p.source.startsWith('real_');
-    return p.dimension === activeCategory || p.dimension === `${activeCategory}_real`;
+    return CATEGORY_TABS.find((t) => t.key === activeCategory)!.dims.includes(p.dimension);
   });
 
   const handleCopy = (id: string, text: string) => {
@@ -315,7 +326,7 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
     try {
       const fresh = await apiFetch<ApiPattern[]>('/api/patterns/refresh', { method: 'POST' });
       setPatterns(fresh);
-      onNotify?.('تم تحديث مخزن الأنماط', `${fresh.length} نمط محدّث من بيانات حقيقية ومركّبة`, 'info');
+      onNotify?.('تم تحديث مخزن الأنماط', `${fresh.length} نمط محدّث من بيانات حقيقية`, 'info');
     } catch (err) {
       onNotify?.('تعذر تحديث مخزن الأنماط', describeError(err).desc, 'info');
     } finally {
@@ -543,7 +554,6 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {filteredPatterns.map((pattern) => {
               const meta = DIMENSION_META[pattern.dimension] ?? DIMENSION_META.content_type;
-              const isReal = pattern.source.startsWith('real_');
               return (
                 <div
                   key={pattern.pattern_id}
@@ -555,15 +565,13 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
                         {meta.label}
                       </span>
                       <div className="flex items-center gap-1.5">
-                        {isReal && (
-                          <span
-                            title="مبني على بيانات حقيقية موثّقة"
-                            className="flex items-center gap-0.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full font-arabic"
-                          >
-                            <ShieldCheck className="w-3 h-3" />
-                            حقيقي
-                          </span>
-                        )}
+                        <span
+                          title="مصدر البيانات الحقيقية لهذا النمط"
+                          className="flex items-center gap-0.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full font-arabic"
+                        >
+                          <ShieldCheck className="w-3 h-3" />
+                          {SOURCE_LABEL[pattern.source] ?? 'بيانات حقيقية'}
+                        </span>
                         <div className="p-1.5 rounded-lg bg-white border border-slate-200/70 shadow-2xs">
                           {meta.icon}
                         </div>
@@ -572,6 +580,7 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
                     <p className="text-xs text-slate-800 font-arabic leading-relaxed text-right font-medium">
                       {pattern.pattern}
                     </p>
+                    <p className="mt-1.5 text-[10px] text-slate-500 font-arabic leading-relaxed text-right">{pattern.supporting_metric}</p>
                   </div>
 
                   <div className="mt-4 pt-2.5 border-t border-slate-200/70 flex items-center justify-between">
