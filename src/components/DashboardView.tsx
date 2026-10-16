@@ -53,37 +53,37 @@ const DIMENSION_META: Record<ApiPattern['dimension'], { label: string; icon: Rea
     tagColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   },
   platform_reach_real: {
-    label: 'منصات حج 1445هـ',
+    label: 'موسم حج 1445هـ',
     icon: <Globe className="w-4 h-4 text-blue-600" />,
     tagColor: 'bg-blue-50 text-blue-700 border-blue-200',
   },
   awj_sada_real: {
-    label: 'أوج | صدى',
+    label: 'بودكاست أوج | صدى',
     icon: <Radio className="w-4 h-4 text-rose-600" />,
     tagColor: 'bg-rose-50 text-rose-700 border-rose-200',
   },
   content_type_real: {
-    label: 'نوع المحتوى (بيانات حقيقية)',
+    label: 'نوع المحتوى',
     icon: <Video className="w-4 h-4 text-violet-600" />,
     tagColor: 'bg-violet-50 text-violet-700 border-violet-200',
   },
   timing_real: {
-    label: 'توقيت (بيانات حقيقية)',
+    label: 'التوقيت',
     icon: <Clock className="w-4 h-4 text-amber-600" />,
     tagColor: 'bg-amber-50 text-amber-700 border-amber-200',
   },
   topic_real: {
-    label: 'الموضوع (بيانات حقيقية)',
+    label: 'الموضوع',
     icon: <BookOpen className="w-4 h-4 text-emerald-600" />,
     tagColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   },
   channel_topic_real: {
-    label: 'الحساب والموضوع',
+    label: 'الحساب',
     icon: <Users className="w-4 h-4 text-teal-600" />,
     tagColor: 'bg-teal-50 text-teal-700 border-teal-200',
   },
   platform_content_real: {
-    label: 'مقارنة بين المنصات',
+    label: 'المنصات',
     icon: <Globe className="w-4 h-4 text-blue-600" />,
     tagColor: 'bg-blue-50 text-blue-700 border-blue-200',
   },
@@ -100,12 +100,19 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 // Every pattern served by /api/patterns is computed from real data, so tabs group by what it describes.
-const CATEGORY_TABS: { key: 'all' | 'content_type' | 'timing' | 'topic' | 'platform'; label: string; dims: string[] }[] = [
+// Every pattern is computed from real data, so tabs group by the publishing decision it supports.
+const CATEGORY_TABS: {
+  key: 'all' | 'content_type' | 'timing' | 'topic' | 'account' | 'platform' | 'season';
+  label: string;
+  dims: string[];
+}[] = [
   { key: 'all', label: 'الكل', dims: [] },
-  { key: 'content_type', label: 'نوع المحتوى', dims: ['content_type_real', 'platform_content_real'] },
-  { key: 'timing', label: 'توقيت', dims: ['timing_real'] },
-  { key: 'topic', label: 'الموضوع والحساب', dims: ['topic_real', 'channel_topic_real', 'awj_sada_real'] },
-  { key: 'platform', label: 'المنصات', dims: ['platform_reach_real'] },
+  { key: 'content_type', label: 'نوع المحتوى', dims: ['content_type_real'] },
+  { key: 'timing', label: 'التوقيت', dims: ['timing_real'] },
+  { key: 'topic', label: 'الموضوع', dims: ['topic_real'] },
+  { key: 'account', label: 'الحسابات', dims: ['channel_topic_real'] },
+  { key: 'platform', label: 'المنصات', dims: ['platform_content_real'] },
+  { key: 'season', label: 'مواسم وبرامج', dims: ['platform_reach_real', 'awj_sada_real'] },
 ];
 
 const REFRESH_MS = 60_000;
@@ -341,11 +348,11 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
     })();
   }, []);
 
-  const filteredPatterns = patterns.filter((p) => {
-    if (!p.source.startsWith('real_')) return false; // never show synthetic/demo patterns
-    if (activeCategory === 'all') return true;
-    return CATEGORY_TABS.find((t) => t.key === activeCategory)!.dims.includes(p.dimension);
-  });
+  const realPatterns = patterns.filter((p) => p.source.startsWith('real_')); // never show synthetic/demo patterns
+  const inTab = (key: (typeof CATEGORY_TABS)[number]['key'], p: ApiPattern) =>
+    key === 'all' || CATEGORY_TABS.find((t) => t.key === key)!.dims.includes(p.dimension);
+  const tabCount = (key: (typeof CATEGORY_TABS)[number]['key']) => realPatterns.filter((p) => inTab(key, p)).length;
+  const filteredPatterns = realPatterns.filter((p) => inTab(activeCategory, p));
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard?.writeText(text);
@@ -556,7 +563,7 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
                 مخزن الأنماط المشترك
               </h3>
               <p className="text-xs text-slate-400 font-arabic">
-                أنماط مستخرجة آلياً لدعم قرارات النشر
+                أنماط مثبتة إحصائياً من بيانات الهيئة الحقيقية لدعم قرارات النشر · كل نمط يذكر عدد المنشورات التي بُني عليها
               </p>
             </div>
           </div>
@@ -564,7 +571,7 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
           {/* Filter Pills + Refresh */}
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
-              {CATEGORY_TABS.map((tab) => (
+              {CATEGORY_TABS.filter((tab) => tab.key === 'all' || tabCount(tab.key) > 0).map((tab) => (
                 <button
                   key={tab.key}
                   onClick={() => setActiveCategory(tab.key)}
@@ -574,7 +581,7 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  {tab.label}
+                  {tab.label} <span className="text-slate-400 font-normal">({tabCount(tab.key)})</span>
                 </button>
               ))}
             </div>
