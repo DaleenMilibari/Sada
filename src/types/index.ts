@@ -79,3 +79,81 @@ export interface ModelAccuracy {
   beats_baseline: boolean | null;
   computed_at: string;
 }
+
+// --- Task 3: Live dashboard & analytics (mirrors backend/schemas.py) ---
+
+export type Platform = 'youtube' | 'instagram';
+
+export interface AnalyticsSummary {
+  generated_at: string;
+  data_as_of: string | null;
+  days: number;
+  platform: Platform | null;
+  min_post_age_days: number;
+  totals: { posts: number; views: number; likes: number; comments: number; engagement_rate: number | null };
+  by_platform: { platform: Platform; accounts: number; posts: number; followers: number; likes: number; comments: number }[];
+  by_channel: {
+    platform: Platform;
+    entity_key: string;
+    name_ar: string;
+    subscriber_count: number | null;
+    posts: number;
+    views: number | null;
+    median_performance_index: number;
+    engagement_rate: number | null;
+  }[];
+  by_content_type: { platform: Platform; content_type: string; posts: number; median_performance_index: number }[];
+  by_topic: { topic: string; label_ar: string; posts: number; median_performance_index: number }[];
+  best_times: { platform: Platform; day_of_week: string; hour: number; median_performance_index: number; n: number }[];
+}
+
+export interface CollectorRun {
+  id: number;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  error: string | null;
+}
+
+export interface CollectorStatus {
+  enabled: boolean;
+  youtube_enabled: boolean;
+  instagram_enabled: boolean;
+  schedule_enabled: boolean;
+  interval_minutes: number;
+  total_videos: number;
+  runs: CollectorRun[];
+}
+
+// --- Task 4: Spikes, drops & diagnosis ---
+
+export interface Alert {
+  alert_id: string;
+  kind: 'spike' | 'drop';
+  video: VideoOut;
+  metric: 'views' | 'interactions';
+  observed: number;
+  expected: number;
+  ratio: number;
+  severity: 'high' | 'medium';
+  detected_at: string;
+  detection: 'level' | 'velocity';
+  basis: 'same_age' | 'plateau' | 'snapshots';
+  peers: number;
+  explanation: string;
+}
+
+export interface ContributingFactor {
+  reason: string;
+  supporting_metric: string;
+  evidence_source_title: string;
+  evidence_url_or_ref: string;
+  confidence: number;
+}
+
+export interface DiagnosisResult {
+  diagnosis: string;
+  contributing_factors: ContributingFactor[];
+  recommendations: string[];
+  low_confidence: boolean;
+}

@@ -1,4 +1,4 @@
-import { BarChart3, Wand2, Tv2, ChevronLeft, ShieldCheck } from 'lucide-react';
+import { BarChart3, Wand2, BellRing, ChevronLeft, ShieldCheck } from 'lucide-react';
 import type { ActiveView } from '../types';
 
 interface SidebarProps {
@@ -10,7 +10,7 @@ const navItems: { id: ActiveView; icon: React.ReactNode; label: string }[] = [
   {
     id: 'dashboard',
     icon: <BarChart3 className="w-5 h-5" />,
-    label: 'لوحة التحكم والأنماط',
+    label: 'لوحة التحليلات والأنماط',
   },
   {
     id: 'optimizer',
@@ -19,8 +19,8 @@ const navItems: { id: ActiveView; icon: React.ReactNode; label: string }[] = [
   },
   {
     id: 'broadcast',
-    icon: <Tv2 className="w-5 h-5" />,
-    label: 'مراقب البث والتشخيص',
+    icon: <BellRing className="w-5 h-5" />,
+    label: 'التنبيهات والتشخيص',
   },
 ];
 
@@ -38,22 +38,6 @@ export default function Sidebar({ activeView, onViewChange }: SidebarProps) {
           <span className="text-[11px] font-bold text-slate-400 font-arabic border-r border-slate-200 pr-2.5">
             ذكاء البث المتزامن
           </span>
-        </div>
-      </div>
-
-      {/* ── Sync Badge ── */}
-      <div className="mx-4 mt-4 mb-2">
-        <div className="flex items-center justify-between bg-emerald-50/70 border border-emerald-200/70 rounded-xl px-3 py-2">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
-            </span>
-            <span className="text-xs font-bold text-emerald-800 font-arabic">
-              تزامن الوكلاء نشط
-            </span>
-          </div>
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
         </div>
       </div>
 

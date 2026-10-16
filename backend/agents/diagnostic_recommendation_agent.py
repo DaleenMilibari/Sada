@@ -367,6 +367,253 @@ def diagnose_awj_topic(
     }
 
 
+# ---------------------------------------------------------------------------
+# Task 4 - diagnosis of a real collected post (YouTube video or Instagram post)
+#
+# Comparable posts are retrieved from the database (same platform + account + topic +
+# content type, published within +-14 days). Every factor is computed from those real posts
+# and cites one of them by permalink *before* any LLM is involved; the LLM only words the
+# result. With too few comparables the result is low_confidence - nothing is invented.
+# Findings are correlations between a post and its peers, not proven causes.
+# ---------------------------------------------------------------------------
+
+import re
+import statistics
+from datetime import timedelta
+
+from sqlalchemy import select
+
+from backend import db, repository
+
+COMPARABLE_WINDOW_DAYS = 14
+MIN_REAL_COMPARABLES = 3
+UNDER, OVER = 0.8, 1.25  # ratio to the comparables' median beyond which a post counts as under/over-performing
+_EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿]")
+
+_FEATURE_LABELS = {
+    "question": "علامة استفهام",
+    "number": "رقم",
+    "emoji": "إيموجي",
+    "long_title": "عنوان طويل (أكثر من ٧٠ حرفاً)",
+}
+
+
+def _primary_value(p: dict[str, Any]) -> int | None:
+    if p["platform"] == "youtube":
+        return p["view_count"]
+    parts = [x for x in (p["like_count"], p["comment_count"]) if x is not None]
+    return sum(parts) if parts else None
+
+
+def _local_hour(p: dict[str, Any]) -> int:
+    return p["published_at"].astimezone(repository.RIYADH_TZ).hour
+
+
+def title_features(title: str) -> dict[str, bool]:
+    t = title or ""
+    return {
+        "question": "?" in t or "؟" in t,
+        "number": bool(re.search("[0-9٠-٩]", t)),
+        "emoji": bool(_EMOJI.search(t)),
+        "long_title": len(t) > 70,
+    }
+
+
+def _engagement_rate(p: dict[str, Any]) -> float | None:
+    parts = [x for x in (p["like_count"], p["comment_count"]) if x is not None]
+    return sum(parts) / p["view_count"] if parts and p.get("view_count") else None
+
+
+def _load_comparables(post: dict[str, Any], same_topic: bool) -> list[dict[str, Any]]:
+    v, c = db.videos.c, db.channels.c
+    stmt = (
+        select(*repository._video_columns())
+        .join(db.channels, v.channel_id == c.channel_id)
+        .where(v.platform == post["platform"], c.entity_key == post["entity_key"], v.content_type == post["content_type"])
+        .where(v.video_id != post["video_id"])
+        .where(v.published_at >= post["published_at"] - timedelta(days=COMPARABLE_WINDOW_DAYS))
+        .where(v.published_at <= post["published_at"] + timedelta(days=COMPARABLE_WINDOW_DAYS))
+    )
+    if same_topic:
+        stmt = stmt.where(v.topic == post["topic"])
+    with db.get_engine().connect() as conn:
+        rows = [repository._video_dict(r) for r in conn.execute(stmt)]
+    return [r for r in rows if _primary_value(r) is not None]
+
+
+def _fmt(n: float) -> str:
+    return f"{n:,.0f}"
+
+
+def build_video_diagnosis_context(post: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic retrieval + factor construction. No LLM, no invented numbers."""
+    empty = {"post": post, "comparable": [], "basis": "none", "factors": [], "direction": None, "ratio": None, "low_confidence": True}
+    value = _primary_value(post)
+    if value is None:
+        return empty
+
+    basis = "topic"
+    comparable = _load_comparables(post, same_topic=True)
+    if len(comparable) < MIN_REAL_COMPARABLES:
+        basis = "account"  # broaden once (any topic) - flagged in the output
+        comparable = _load_comparables(post, same_topic=False)
+    if len(comparable) < MIN_REAL_COMPARABLES:
+        return empty
+
+    median = statistics.median(_primary_value(c) for c in comparable)
+    if not median:
+        return empty
+    ratio = value / median
+    direction = "under" if ratio < UNDER else "over" if ratio > OVER else "in_line"
+    metric_ar = "المشاهدات" if post["platform"] == "youtube" else "التفاعل (إعجابات + تعليقات)"
+    ranked = sorted(comparable, key=_primary_value, reverse=True)
+    half = max(1, len(ranked) // 2)
+    top, bottom = ranked[:half], ranked[-half:]
+    base_conf = round(min(0.9, 0.4 + len(comparable) / 40), 2)
+    scope = "نفس الحساب والموضوع ونوع المحتوى" if basis == "topic" else "نفس الحساب ونوع المحتوى (دون اشتراط الموضوع لقلة العينة)"
+
+    closest = min(comparable, key=lambda c: abs(_primary_value(c) - median))
+    factors: list[dict[str, Any]] = [{
+        "reason": f"{metric_ar} {'أقل' if ratio < 1 else 'أعلى'} من وسيط المنشورات المشابهة ({scope}، ±{COMPARABLE_WINDOW_DAYS} يوماً) بنسبة {abs(ratio - 1) * 100:.0f}%.",
+        "supporting_metric": f"{_fmt(value)} مقابل وسيط {_fmt(median)} (n={len(comparable)})",
+        "evidence_source_title": closest["title"],
+        "evidence_url_or_ref": closest["url"],
+        "confidence": base_conf,
+        "recommendation": None,
+    }]
+
+    if direction != "in_line":
+        # An under-performer is compared with the best peers, an over-performer with the worst.
+        group, other = (top, bottom) if direction == "under" else (bottom, top)
+        word = "الأعلى أداءً" if direction == "under" else "الأقل أداءً"
+        anchor = group[0]
+        fix = direction == "under"
+
+        hours = [_local_hour(c) for c in group]
+        ref_hour, my_hour = round(statistics.median(hours)), _local_hour(post)
+        gap = min(abs(my_hour - ref_hour), 24 - abs(my_hour - ref_hour))
+        near = sum(min(abs(h - ref_hour), 24 - abs(h - ref_hour)) <= 2 for h in hours) / len(hours)
+        if len(group) >= 2 and gap >= 3 and near >= 0.4:  # only when the comparison group actually clusters around one hour
+            factors.append({
+                "reason": f"ساعة النشر ({my_hour}:00 بتوقيت الرياض) تختلف عن ساعة نشر المنشورات {word} (حوالي {ref_hour}:00).",
+                "supporting_metric": f"فرق {gap} ساعات؛ {near * 100:.0f}% من {len(group)} منشورات مقارنة نُشرت خلال ±٢ ساعة من {ref_hour}:00",
+                "evidence_source_title": anchor["title"],
+                "evidence_url_or_ref": anchor["url"],
+                "confidence": round(base_conf * 0.8, 2),
+                "recommendation": f"جرّب النشر قرب الساعة {ref_hour}:00 بتوقيت الرياض، كما في المنشورات الأعلى أداءً." if fix else None,
+            })
+
+        my_dur = post.get("duration_seconds")
+        durs = [c["duration_seconds"] for c in group if c.get("duration_seconds")]
+        if my_dur and len(durs) >= 2:
+            ref_dur = statistics.median(durs)
+            if abs(my_dur - ref_dur) / ref_dur >= 0.4:
+                factors.append({
+                    "reason": f"مدة المقطع ({my_dur} ث) تختلف جوهرياً عن مدة المنشورات {word} (وسيطها {ref_dur:.0f} ث).",
+                    "supporting_metric": f"{my_dur} ث مقابل وسيط {ref_dur:.0f} ث (n={len(durs)})",
+                    "evidence_source_title": anchor["title"],
+                    "evidence_url_or_ref": anchor["url"],
+                    "confidence": round(base_conf * 0.8, 2),
+                    "recommendation": f"قرّب مدة المقطع من {ref_dur:.0f} ثانية." if fix else None,
+                })
+
+        mine = title_features(post["title"])
+        for name, label in _FEATURE_LABELS.items():
+            rate = sum(title_features(c["title"])[name] for c in group) / len(group)
+            rate_other = sum(title_features(c["title"])[name] for c in other) / len(other)
+            if len(group) < 2 or abs(rate - rate_other) < 0.4:
+                continue
+            majority = rate >= 0.5
+            if mine[name] == majority:
+                continue  # the post already looks like the comparison group on this feature
+            example = next((c for c in group if title_features(c["title"])[name] == majority), anchor)
+            factors.append({
+                "reason": (
+                    f"عنوان المنشور {'يحتوي على' if mine[name] else 'لا يحتوي على'} {label}، بينما "
+                    f"{(rate if majority else 1 - rate) * 100:.0f}% من المنشورات {word} {'تحتوي' if majority else 'لا تحتوي'} عليه."
+                ),
+                "supporting_metric": f"{rate * 100:.0f}% مقابل {rate_other * 100:.0f}% في المجموعة المقابلة (n={len(group)})",
+                "evidence_source_title": example["title"],
+                "evidence_url_or_ref": example["url"],
+                "confidence": round(base_conf * 0.6, 2),
+                "recommendation": f"{'أضف' if majority else 'تجنّب'} {label} في عناوين المحتوى المشابه." if fix else None,
+            })
+
+        if post["platform"] == "youtube":
+            my_er = _engagement_rate(post)
+            ers = [e for e in (_engagement_rate(c) for c in comparable) if e is not None]
+            if my_er is not None and len(ers) >= MIN_REAL_COMPARABLES:
+                ref_er = statistics.median(ers)
+                if ref_er and abs(my_er / ref_er - 1) >= 0.3:
+                    factors.append({
+                        "reason": f"معدل التفاعل (إعجابات + تعليقات ÷ مشاهدات) {'أقل' if my_er < ref_er else 'أعلى'} من وسيط المنشورات المشابهة.",
+                        "supporting_metric": f"{my_er * 100:.2f}% مقابل وسيط {ref_er * 100:.2f}% (n={len(ers)})",
+                        "evidence_source_title": closest["title"],
+                        "evidence_url_or_ref": closest["url"],
+                        "confidence": round(base_conf * 0.8, 2),
+                        "recommendation": None,
+                    })
+
+    return {"post": post, "comparable": comparable, "basis": basis, "factors": factors, "direction": direction, "ratio": ratio, "low_confidence": False}
+
+
+def _deterministic_synthesis(ctx: dict[str, Any]) -> tuple[str, list[str]]:
+    """Evidence-only wording, used when the LLM is unavailable."""
+    post, ratio, direction = ctx["post"], ctx["ratio"], ctx["direction"]
+    head = {
+        "under": f"أداء «{post['title']}» أقل من المعتاد لمنشورات مشابهة ({ratio:.2f}× الوسيط).",
+        "over": f"أداء «{post['title']}» أعلى من المعتاد لمنشورات مشابهة ({ratio:.2f}× الوسيط).",
+        "in_line": f"أداء «{post['title']}» ضمن المعتاد لمنشورات مشابهة ({ratio:.2f}× الوسيط)؛ لا يوجد انحراف يستدعي تفسيراً.",
+    }[direction]
+    extra = [f["reason"] for f in ctx["factors"][1:3]]
+    recs = [f["recommendation"] for f in ctx["factors"] if f.get("recommendation")]
+    if not recs:
+        recs = (
+            ["لم يظهر فرق واضح في التوقيت أو المدة أو العنوان؛ قد يعود الأداء إلى عوامل غير مرصودة في البيانات."]
+            if direction == "under"
+            else ["لا توجد توصية محددة مدعومة بالأدلة؛ استمر في مراقبة الأداء."]
+        )
+    return " ".join([head, *extra]), recs
+
+
+def _synthesize_video_via_llm(ctx: dict[str, Any]) -> tuple[str, list[str]]:
+    post = ctx["post"]
+    factors_desc = "\n".join(f"{i}. {f['reason']} | المقياس: {f['supporting_metric']}" for i, f in enumerate(ctx["factors"]))
+    prompt = (
+        f"أنت محلل أداء محتوى لهيئة الإذاعة والتلفزيون السعودية. اشرح أداء المنشور ‘{post['title']}’ "
+        f"(نسبته إلى وسيط المنشورات المشابهة: {ctx['ratio']:.2f}×) بالاستناد حصراً إلى العوامل التالية المستخرجة من بيانات حقيقية. "
+        "لا تُضِف أي سبب أو رقم من عندك، وصرّح بأن الارتباط لا يثبت السببية.\n\n"
+        f"{factors_desc}\n\n"
+        'أعد فقط JSON بالمفاتيح: "diagnosis" (2-3 جمل بالعربية) و"recommendations" (قائمة 1-3 توصيات قصيرة مبنية على العوامل).'
+    )
+    parsed = json.loads(llm_client.generate_json(prompt))
+    return parsed["diagnosis"], [str(r) for r in parsed["recommendations"]]
+
+
+def diagnose_video(video_id: str) -> dict[str, Any] | None:
+    """Diagnosis of a collected post, or None if the post doesn't exist."""
+    post = repository.get_video(video_id)
+    if post is None:
+        return None
+    post.pop("snapshots", None)
+    ctx = build_video_diagnosis_context(post)
+    if ctx["low_confidence"]:
+        return {
+            "diagnosis": "لا تتوفر منشورات مشابهة كافية (نفس الحساب ونوع المحتوى خلال ±١٤ يوماً) لتقديم تشخيص موثوق لهذا المنشور.",
+            "contributing_factors": [],
+            "recommendations": ["انتظر تراكم المزيد من المنشورات المشابهة قبل التشخيص."],
+            "low_confidence": True,
+        }
+    try:
+        diagnosis, recs = _synthesize_video_via_llm(ctx)
+    except Exception:  # no key / model error / malformed JSON: fall back to evidence-only wording
+        diagnosis, recs = _deterministic_synthesis(ctx)
+    if ctx["basis"] == "account":
+        diagnosis += " (ملاحظة: المقارنة على مستوى الحساب ونوع المحتوى لقلة المنشورات بنفس الموضوع.)"
+    factors = [{k: v for k, v in f.items() if k != "recommendation"} for f in ctx["factors"]]
+    return {"diagnosis": diagnosis, "contributing_factors": factors, "recommendations": recs, "low_confidence": False}
+
+
 if __name__ == "__main__":
     sample_item = {
         "content_id": "diag-1",
