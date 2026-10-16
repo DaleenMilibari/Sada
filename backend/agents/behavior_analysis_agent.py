@@ -13,6 +13,8 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+from backend.topics import TOPICS
+
 DATA_PATH = Path(__file__).parent.parent / "data" / "engagement_records.json"
 REAL_DATA_PATH = Path(__file__).parent.parent / "data" / "hajj_1445_platform_totals.json"
 AWJ_REAL_DATA_PATH = Path(__file__).parent.parent / "data" / "awj_sada_real.json"
@@ -138,6 +140,9 @@ def _slice_pattern(
     return patterns
 
 
+PLATFORM_LABELS_AR = {"youtube": "يوتيوب", "instagram": "إنستغرام"}
+
+
 def hour_bucket(day_of_week: str, hour: int) -> str:
     is_weekday = day_of_week in {"sun", "mon", "tue", "wed", "thu"}
     if not is_weekday:
@@ -188,6 +193,114 @@ def analyze(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
     return patterns
+
+
+def analyze_real_data(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Patterns from real SBA YouTube + Instagram posts.
+
+    `records` is the output of backend.repository.analysis_records(): one flat
+    dict per post, already restricted to posts old enough to have settled
+    engagement, with `performance_index` (the post's primary metric divided by
+    its own platform+channel+content_type median) as the comparable score -
+    no extra normalization needed here, unlike analyze()'s synthetic path.
+
+    Each platform is sliced separately (content type, timing, topic, and
+    channel|topic) and tagged with its own source, since YouTube and
+    Instagram posts aren't on the same scale even after indexing. A separate
+    pass compares content types *across* both platforms at once (e.g. "Reels
+    on Instagram vs. Shorts on YouTube"), tagged source="real_sba" since it
+    isn't about one platform. Reuses the same significance gates as analyze()
+    (MIN_SAMPLES / MIN_LIFT / MIN_T_STAT via _slice_pattern) so a channel or
+    topic with too few real posts never produces a pattern.
+    """
+    if not records:
+        return []
+
+    def score_fn(r: dict[str, Any]) -> float:
+        return r["performance_index"]
+
+    def _tag_source(patterns: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
+        for p in patterns:
+            p["source"] = source
+        return patterns
+
+    all_patterns: list[dict[str, Any]] = []
+
+    for platform in ("youtube", "instagram"):
+        platform_records = [r for r in records if r["platform"] == platform]
+        if not platform_records:
+            continue
+        platform_ar = PLATFORM_LABELS_AR.get(platform, platform)
+        source = f"real_{platform}_sba"
+        channel_names = {r["entity_key"]: r["channel_name_ar"] for r in platform_records}
+
+        content_patterns = _slice_pattern(
+            platform_records,
+            "content_type_real",
+            key_fn=lambda r: r["content_type"],
+            describe_fn=lambda key, lift, direction, platform_ar=platform_ar: (
+                f"محتوى {key} على {platform_ar} يحقق مؤشر أداء {direction} بنسبة {abs(lift) * 100:.0f}% "
+                f"عن بقية أنواع المحتوى على المنصة نفسها."
+            ),
+            score_fn=score_fn,
+        )
+        all_patterns += _tag_source(content_patterns, source)
+
+        timing_patterns = _slice_pattern(
+            platform_records,
+            "timing_real",
+            key_fn=lambda r: hour_bucket(r["day_of_week"], r["publish_hour"]),
+            describe_fn=lambda key, lift, direction, platform_ar=platform_ar: (
+                f"النشر في الفترة ({key}) على {platform_ar} يرتبط بمؤشر أداء {direction} بنسبة "
+                f"{abs(lift) * 100:.0f}% عن بقية الأوقات على المنصة نفسها."
+            ),
+            score_fn=score_fn,
+        )
+        all_patterns += _tag_source(timing_patterns, source)
+
+        topic_patterns = _slice_pattern(
+            platform_records,
+            "topic_real",
+            key_fn=lambda r: r["topic"],
+            describe_fn=lambda key, lift, direction, platform_ar=platform_ar: (
+                f"موضوع '{TOPICS.get(key, key)}' على {platform_ar} يحقق مؤشر أداء {direction} بنسبة "
+                f"{abs(lift) * 100:.0f}% عن بقية الموضوعات على المنصة نفسها."
+            ),
+            score_fn=score_fn,
+        )
+        all_patterns += _tag_source(topic_patterns, source)
+
+        channel_topic_patterns = _slice_pattern(
+            platform_records,
+            "channel_topic_real",
+            key_fn=lambda r: f"{r['entity_key']}|{r['topic']}",
+            describe_fn=lambda key, lift, direction, platform_ar=platform_ar, channel_names=channel_names: (
+                f"حساب {channel_names.get(key.split('|')[0], key.split('|')[0])} على {platform_ar} يحقق مؤشر "
+                f"أداء {direction} بنسبة {abs(lift) * 100:.0f}% في موضوع '{TOPICS.get(key.split('|')[1], key.split('|')[1])}' "
+                f"مقارنة ببقية محتواه."
+            ),
+            score_fn=score_fn,
+        )
+        all_patterns += _tag_source(channel_topic_patterns, source)
+
+    # Cross-platform: does this content type on this platform beat the pooled
+    # cross-platform baseline for content type (e.g. Reels on Instagram vs.
+    # Shorts on YouTube)? Needs both platforms present to mean anything.
+    platforms_seen = {r["platform"] for r in records}
+    if len(platforms_seen) >= 2:
+        cross_patterns = _slice_pattern(
+            records,
+            "platform_content_real",
+            key_fn=lambda r: f"{r['platform']}|{r['content_type']}",
+            describe_fn=lambda key, lift, direction: (
+                f"محتوى {key.split('|')[1]} على {PLATFORM_LABELS_AR.get(key.split('|')[0], key.split('|')[0])} "
+                f"يحقق مؤشر أداء {direction} بنسبة {abs(lift) * 100:.0f}% عن بقية أنواع المحتوى عبر كل المنصات."
+            ),
+            score_fn=score_fn,
+        )
+        all_patterns += _tag_source(cross_patterns, "real_sba")
+
+    return all_patterns
 
 
 def _load_real_hajj_totals(path: Path = REAL_DATA_PATH) -> dict[str, Any] | None:
@@ -424,9 +537,32 @@ def run(
     store_path: Path = STORE_PATH,
     real_data_path: Path = REAL_DATA_PATH,
     awj_real_data_path: Path = AWJ_REAL_DATA_PATH,
+    real_sba_records: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    """Rebuild the pattern store. Real SBA patterns come first (team.md Task 1:
+    "Keep the synthetic and Hajj patterns, but real ones must come first"),
+    then the synthetic seed, then the Hajj/AWJ season-level sources.
+
+    `real_sba_records` is backend.repository.analysis_records() output - pass
+    it explicitly from tests against a seeded database. When omitted, this
+    fetches it itself so every caller (startup, POST /api/patterns/refresh)
+    gets real patterns without wiring repository through every call site; if
+    the database isn't reachable yet (e.g. a fresh environment with nothing
+    collected), it degrades to no real patterns rather than failing the run.
+    """
+    patterns: list[dict[str, Any]] = []
+
+    if real_sba_records is None:
+        try:
+            from backend import repository
+
+            real_sba_records = repository.analysis_records()
+        except Exception:
+            real_sba_records = []
+    patterns += analyze_real_data(real_sba_records)
+
     records = _load_records(dataset_path)
-    patterns = analyze(records)
+    patterns += analyze(records)
 
     real_totals = _load_real_hajj_totals(real_data_path)
     if real_totals:
