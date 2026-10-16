@@ -272,3 +272,33 @@ class CollectorStatus(BaseModel):
     total_snapshots: int
     quota_units_last_24h: int
     runs: list[CollectorRunOut]
+
+
+# --- Task 2 (team.md): Trends & Viral Prediction ---
+
+
+class TrendingItem(BaseModel):
+    video: VideoOut
+    views_per_hour: float
+    # views_per_hour / the channel's median for videos of the same age bucket.
+    velocity_index: float
+    viral_score: float = Field(ge=0, le=1)
+    # Null when there isn't enough snapshot history to know the channel's growth curve - never guessed.
+    predicted_views_7d: int | None = None
+    reason: str
+
+
+class ModelAccuracy(BaseModel):
+    method: str
+    # Additive: "insufficient_history" until enough videos have both day-1 and day-7
+    # snapshots - the score fields below are then null rather than invented.
+    status: Literal["ok", "insufficient_history"] = "ok"
+    train_window: str | None = None
+    test_window: str | None = None
+    n_test: int
+    n_eligible: int = 0  # videos with both day-1 and day-7 views measured
+    mape: float | None = None  # percent
+    baseline_mape: float | None = None  # percent, naive "channel median" baseline
+    top10_hit_rate: float | None = None  # 0-1
+    beats_baseline: bool | None = None
+    computed_at: datetime

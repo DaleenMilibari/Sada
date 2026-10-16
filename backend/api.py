@@ -27,6 +27,7 @@ from backend.agents import (
     diagnostic_recommendation_agent,
     live_clip_detection_agent,
     llm_client,
+    trend_prediction_agent,
 )
 from backend.rate_limit import limit_llm, limit_login
 from backend.schemas import (
@@ -41,6 +42,8 @@ from backend.schemas import (
     Pattern,
     PublishedItemMetrics,
     DiagnosisResult,
+    ModelAccuracy,
+    TrendingItem,
     VideoDetail,
     VideoPage,
 )
@@ -240,6 +243,23 @@ def trigger_collector_run(background_tasks: BackgroundTasks):
         raise HTTPException(status_code=409, detail="A collector run is already in progress.")
     background_tasks.add_task(data_collector_agent.run, "manual")
     return {"status": "started"}
+
+
+
+# --- Task 2: Trends & Viral Prediction (YouTube only - needs view counts) ---
+
+
+@api.get("/trending", response_model=list[TrendingItem])
+def get_trending(
+    hours: int = Query(default=24, ge=1, le=168, description="Only videos whose views were measured in this window"),
+    limit: int = Query(default=10, ge=1, le=50),
+):
+    return trend_prediction_agent.trending(hours, limit)
+
+
+@api.get("/model/accuracy", response_model=ModelAccuracy)
+def get_model_accuracy():
+    return trend_prediction_agent.model_accuracy()
 
 
 app.include_router(api)
