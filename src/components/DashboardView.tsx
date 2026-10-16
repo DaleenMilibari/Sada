@@ -25,6 +25,8 @@ interface ApiPattern {
   affected_content_types: string[];
   dimension:
     | 'content_type' | 'timing' | 'topic_platform' | 'platform_reach_real' | 'awj_sada_real'
+    // Added by Task 1 (backend/schemas.py::Pattern.dimension) for patterns scored on
+    // real SBA YouTube/Instagram data (backend.agents.behavior_analysis_agent.analyze_real_data).
     | 'content_type_real' | 'timing_real' | 'topic_real' | 'channel_topic_real' | 'platform_content_real';
   slice_key: string;
   lift_pct: number;
@@ -52,35 +54,35 @@ const DIMENSION_META: Record<ApiPattern['dimension'], { label: string; icon: Rea
     icon: <Globe className="w-4 h-4 text-blue-600" />,
     tagColor: 'bg-blue-50 text-blue-700 border-blue-200',
   },
-  content_type_real: {
-    label: 'نوع المحتوى',
-    icon: <Video className="w-4 h-4 text-violet-600" />,
-    tagColor: 'bg-violet-50 text-violet-700 border-violet-200',
-  },
-  timing_real: {
-    label: 'توقيت',
-    icon: <Clock className="w-4 h-4 text-amber-600" />,
-    tagColor: 'bg-amber-50 text-amber-700 border-amber-200',
-  },
-  topic_real: {
-    label: 'الموضوع',
-    icon: <Award className="w-4 h-4 text-emerald-600" />,
-    tagColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  },
-  channel_topic_real: {
-    label: 'القناة والموضوع',
-    icon: <Award className="w-4 h-4 text-emerald-600" />,
-    tagColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  },
-  platform_content_real: {
-    label: 'المنصة والنوع',
-    icon: <Globe className="w-4 h-4 text-blue-600" />,
-    tagColor: 'bg-blue-50 text-blue-700 border-blue-200',
-  },
   awj_sada_real: {
     label: 'أوج | صدى',
     icon: <Radio className="w-4 h-4 text-rose-600" />,
     tagColor: 'bg-rose-50 text-rose-700 border-rose-200',
+  },
+  content_type_real: {
+    label: 'نوع المحتوى (بيانات حقيقية)',
+    icon: <Video className="w-4 h-4 text-violet-600" />,
+    tagColor: 'bg-violet-50 text-violet-700 border-violet-200',
+  },
+  timing_real: {
+    label: 'توقيت (بيانات حقيقية)',
+    icon: <Clock className="w-4 h-4 text-amber-600" />,
+    tagColor: 'bg-amber-50 text-amber-700 border-amber-200',
+  },
+  topic_real: {
+    label: 'الموضوع (بيانات حقيقية)',
+    icon: <BookOpen className="w-4 h-4 text-emerald-600" />,
+    tagColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  },
+  channel_topic_real: {
+    label: 'الحساب والموضوع',
+    icon: <Users className="w-4 h-4 text-teal-600" />,
+    tagColor: 'bg-teal-50 text-teal-700 border-teal-200',
+  },
+  platform_content_real: {
+    label: 'مقارنة بين المنصات',
+    icon: <Globe className="w-4 h-4 text-blue-600" />,
+    tagColor: 'bg-blue-50 text-blue-700 border-blue-200',
   },
 };
 
