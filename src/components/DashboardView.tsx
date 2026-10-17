@@ -7,13 +7,15 @@ import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer
 } from 'recharts';
 import { ApiError, apiFetch, describeError, ALL_DAYS, daysLabel } from '../lib/api';
-import type { AnalyticsSummary, Platform } from '../types';
+import type { AnalyticsSummary, Platform, OptimizerDraft } from '../types';
 import TrendingPanel from './TrendingPanel';
+import PublishingPlaybook from './PublishingPlaybook';
 import AccuracyCard from './AccuracyCard';
 import AlertsPanel from './AlertsPanel';
 
 interface DashboardViewProps {
   onNotify?: (title: string, desc?: string, type?: 'success' | 'info') => void;
+  onCreateDraft?: (draft: OptimizerDraft) => void;
 }
 
 // Mirrors backend/schemas.py::Pattern.
@@ -311,7 +313,7 @@ function Heatmap({ summary, platform }: { summary: AnalyticsSummary; platform: P
   );
 }
 
-export default function DashboardView({ onNotify }: DashboardViewProps) {
+export default function DashboardView({ onNotify, onCreateDraft }: DashboardViewProps) {
   const [days, setDays] = useState(ALL_DAYS);
   const [platform, setPlatform] = useState<Platform | 'all'>('all');
   const [heatPlatform, setHeatPlatform] = useState<Platform>('youtube');
@@ -567,6 +569,9 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
         </div>
       </div>
 
+      {/* ── Publishing playbook: the patterns below combined into one decision per topic ── */}
+      <PublishingPlaybook onCreateDraft={onCreateDraft} onNotify={onNotify} />
+
       {/* ── Shared Pattern Store ── */}
       <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-5">
@@ -579,7 +584,7 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
                 مخزن الأنماط المشترك
               </h3>
               <p className="text-xs text-slate-400 font-arabic">
-                أنماط مثبتة إحصائياً من بيانات الهيئة الحقيقية لدعم قرارات النشر · كل نمط يذكر عدد المنشورات التي بُني عليها
+                الأدلة التفصيلية خلف خطة النشر أعلاه: أنماط مثبتة إحصائياً من بيانات الهيئة الحقيقية · كل نمط يذكر عدد المنشورات التي بُني عليها
               </p>
             </div>
           </div>

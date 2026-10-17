@@ -263,5 +263,40 @@ export interface OptimizerDraft {
   text: string;
   topic?: string;
   entityKey?: string;
+  contentType?: string;
   source: string; // shown to the user: where this draft came from
+}
+
+// --- Publishing playbook (mirrors backend/schemas.py::Playbook) ---
+
+export interface PlaybookOption {
+  platform: Platform;
+  entity_key: string;
+  name_ar: string;
+  topic_posts: number;
+  topic_multiplier: number;
+  typical_reach: number;
+  expected_reach: number;
+  relative_reach: number | null; // x the typical SBA account on the same platform
+  reach_unit_ar: string;
+  content_type: { content_type: string; label_ar: string; multiplier: number; n: number; scope: 'topic' | 'account' } | null;
+  best_time: { day_of_week: string | null; band: string; label_ar: string; multiplier: number; n: number } | null;
+  confidence: 'high' | 'medium' | 'low';
+  reasons: string[];
+}
+
+export interface PlaybookTopic {
+  topic: string;
+  label_ar: string;
+  posts: number;
+  best: PlaybookOption | null;
+  by_platform: PlaybookOption[];
+  options: PlaybookOption[];
+}
+
+export interface Playbook {
+  generated_at: string;
+  days: number;
+  min_topic_posts: number;
+  topics: PlaybookTopic[];
 }

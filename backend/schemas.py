@@ -583,3 +583,54 @@ class AudienceThemes(BaseModel):
     n_comments: int  # request + criticism comments considered
     status: Literal["ok", "not_enough_comments", "no_llm", "llm_failed"]
     themes: list[AudienceTheme]
+
+
+# --- Publishing playbook (backend/playbook.py) ---
+
+
+class PlaybookContentType(BaseModel):
+    content_type: str
+    label_ar: str
+    multiplier: float  # typical post of this type vs the account's typical post
+    n: int
+    scope: Literal["topic", "account"]  # chosen within the topic, or account-wide (topic sample too small)
+
+
+class PlaybookTime(BaseModel):
+    day_of_week: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"] | None = None
+    band: str
+    label_ar: str
+    multiplier: float
+    n: int
+
+
+class PlaybookOption(BaseModel):
+    platform: Literal["youtube", "instagram", "x"]
+    entity_key: str
+    name_ar: str
+    topic_posts: int
+    topic_multiplier: float
+    typical_reach: int
+    expected_reach: int
+    relative_reach: float | None = None  # x the typical SBA account on the same platform
+    reach_unit_ar: str
+    content_type: PlaybookContentType | None = None
+    best_time: PlaybookTime | None = None
+    confidence: Literal["high", "medium", "low"]
+    reasons: list[str]
+
+
+class PlaybookTopic(BaseModel):
+    topic: str
+    label_ar: str
+    posts: int
+    best: PlaybookOption | None = None
+    by_platform: list[PlaybookOption]
+    options: list[PlaybookOption]
+
+
+class Playbook(BaseModel):
+    generated_at: datetime
+    days: int
+    min_topic_posts: int
+    topics: list[PlaybookTopic]

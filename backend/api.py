@@ -19,7 +19,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException,
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from backend import analytics, auth, config, db, repository
+from backend import analytics, auth, config, db, playbook, repository
 from backend.agents import (
     audience_agent,
     behavior_analysis_agent,
@@ -33,6 +33,7 @@ from backend.agents import (
 )
 from backend.rate_limit import limit_llm, limit_login
 from backend.schemas import (
+    Playbook,
     AudienceAccuracy,
     AudienceThemes,
     AudienceSummary,
@@ -293,6 +294,12 @@ def get_analytics_summary(
     platform: Literal["youtube", "instagram", "x"] | None = None,
 ):
     return analytics.summary(days, platform)
+
+
+@api.get("/playbook", response_model=Playbook)
+def get_playbook(days: int = Query(default=60, ge=7, le=365)):
+    """One complete publishing decision per topic: platform, account, content type, time."""
+    return playbook.playbook(days)
 
 
 # --- Task 4: Spikes, drops & root-cause diagnosis ---

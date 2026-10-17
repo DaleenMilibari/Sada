@@ -81,6 +81,8 @@ const CONTENT_TYPES = [
   { id: 'short', label: 'قصير (Shorts/Reels)' },
   { id: 'image', label: 'صورة' },
   { id: 'carousel', label: 'منشور متعدد' },
+  { id: 'live', label: 'بث مباشر' },
+  { id: 'text', label: 'منشور نصي' },
 ];
 
 // Matches backend/topics.py::TOPICS exactly - the real topic taxonomy the
@@ -116,9 +118,9 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
   const [channels, setChannels] = useState<ChannelOut[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(true);
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
-  const [content, setContent] = useState(initialDraft?.text ?? TEMPLATES[0].text);
+  const [content, setContent] = useState(initialDraft?.text || TEMPLATES[0].text);
   const [tone, setTone] = useState<(typeof TONES)[number]>('تفاعلي');
-  const [contentType, setContentType] = useState('video');
+  const [contentType, setContentType] = useState(initialDraft?.contentType ?? 'video');
   const [topic, setTopic] = useState(initialDraft?.topic ?? 'national_event');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);

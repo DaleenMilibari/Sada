@@ -324,7 +324,7 @@ export default function App() {
       <main className="mr-64 pt-16 min-h-screen">
         <div className="p-7 max-w-[1440px] mx-auto">
           <Suspense fallback={<div className="flex justify-center py-24"><Loader2 className="w-6 h-6 text-emerald-600 animate-spin" /></div>}>
-            {activeView === 'dashboard' && <DashboardView onNotify={showToast} />}
+            {activeView === 'dashboard' && <DashboardView onNotify={showToast} onCreateDraft={openOptimizer} />}
             {activeView === 'optimizer' && <OptimizerView key={optimizerDraft?.text ?? 'blank'} onNotify={showToast} initialDraft={optimizerDraft} />}
             {activeView === 'broadcast' && <AlertsView onNotify={showToast} />}
             {activeView === 'audience' && <AudienceView onNotify={showToast} onCreateDraft={openOptimizer} />}
