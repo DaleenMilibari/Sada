@@ -95,8 +95,9 @@ def classify_pending(limit: int) -> int:
         )
         try:
             mapping = json.loads(llm_client.generate_json(prompt))
-        except llm_client.MissingApiKeyError:
-            return classified
+        except (llm_client.MissingApiKeyError, llm_client.QuotaExhaustedError, llm_client.DeadlineExceededError) as e:
+            logger.warning("Audience classification stopped: %s", e)  # the rest wait for the next run
+            break
         except Exception:
             logger.exception("Audience classification batch failed")
             continue
@@ -433,7 +434,9 @@ def build_themes(days: int = 30, platform: str | None = None) -> dict[str, Any]:
     for t in (data.get("themes") if isinstance(data, dict) else None) or []:
         if not isinstance(t, dict) or t.get("kind") not in THEME_KINDS:
             continue
-        members = sorted({m for m in t.get("members") or [] if isinstance(m, int) and 0 <= m < len(rows) and m not in used})
+        raw_members = t.get("members") if isinstance(t.get("members"), list) else []
+        indices = {int(m) for m in raw_members if isinstance(m, int) or (isinstance(m, str) and m.strip().isdigit())}
+        members = sorted(m for m in indices if 0 <= m < len(rows) and m not in used)
         if len(members) < MIN_THEME_EVIDENCE:
             continue  # not enough real comments behind it - never shown
         used.update(members)

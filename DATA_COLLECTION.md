@@ -156,7 +156,7 @@ We read SBA's **public** posts with our own developer account's app-only bearer 
 4. Run once: `python -m backend.agents.data_collector_agent --platform x`
 
 **Cost control (X bills ≈ $0.005 per post returned):**
-- Each post is read **once**. The first run backfills up to `X_MAX_POSTS_PER_ACCOUNT` (600) posts per account within the lookback window. Later runs only fetch posts newer than the newest one stored.
+- Each post is read **once**. Every run first reads the posts newer than the newest one stored, for every account; the rest of the run's budget backfills toward the lookback window, page by page, always for the account with the shortest history. Past the timeline's ~3,200-tweet reach the backfill uses full-archive search (same price per post).
 - `X_TOTAL_POST_BUDGET` (6,000 ≈ $30) is a hard stop across all runs, counted from the posts already stored.
 - Reposts and replies are excluded. Account ids are looked up once and reused.
 - When the project ends, delete `X_BEARER_TOKEN`. The collected data stays in the database.

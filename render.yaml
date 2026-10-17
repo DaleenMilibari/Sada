@@ -32,7 +32,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+        value: gemini-3.8-flash
       - key: CORS_ORIGINS
         sync: false
       - key: DATABASE_URL
@@ -47,6 +47,8 @@ services:
         sync: false
       - key: META_GRAPH_API_VERSION
         value: v23.0
+      - key: X_BEARER_TOKEN      # optional; pay-per-use - the X_*_BUDGET caps are hard stops
+        sync: false
       - key: COLLECTOR_SCHEDULE_ENABLED
         value: "true"
       - key: COLLECTOR_INTERVAL_MINUTES
@@ -54,4 +56,4 @@ services:
       - key: COLLECTOR_QUOTA_PER_RUN
         value: "300"
       - key: COLLECTOR_LOOKBACK_DAYS
-        value: "60"
+        value: "180"

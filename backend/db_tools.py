@@ -1,6 +1,7 @@
 """Export / import the collected dataset as a gzipped JSON file.
 
-Lets teammates work on the same real data without each spending YouTube quota:
+Lets teammates - and a fresh production database - work on the same real data without spending
+YouTube quota or X credit again (posts, snapshots, audience comments, review labels, follower counts):
 
     python -m backend.db_tools export backend/data/sba_youtube_seed.json.gz
     python -m backend.db_tools import backend/data/sba_youtube_seed.json.gz
@@ -20,8 +21,11 @@ from sqlalchemy import DateTime, insert, select
 
 from backend import db
 
-TABLES = [db.channels, db.videos, db.video_snapshots]
-KEYS = {"channels": "channel_id", "videos": "video_id"}
+# Parents before children (foreign keys). Everything a collector run paid for travels with the seed.
+TABLES = [db.channels, db.videos, db.video_snapshots, db.audience_comments, db.audience_labels, db.follower_snapshots]
+KEYS = {"channels": "channel_id", "videos": "video_id", "audience_comments": "comment_id", "audience_labels": "comment_id"}
+# Time series have no natural key: a row is already present when its (owner, captured_at) is.
+SERIES_OWNER = {"video_snapshots": "video_id", "follower_snapshots": "channel_id"}
 
 
 def _encode(value):
@@ -60,9 +64,9 @@ def import_(path: Path) -> dict[str, int]:
                 key = KEYS[table.name]
                 db.upsert(conn, table, rows, key, [c.name for c in table.columns if c.name != key])
             elif rows:
-                # Snapshots have no natural key: skip ones already present for the same (video, time).
-                existing = {(v, db.as_utc(t)) for v, t in conn.execute(select(table.c.video_id, table.c.captured_at))}
-                rows = [r for r in rows if (r["video_id"], r["captured_at"]) not in existing]
+                owner = SERIES_OWNER[table.name]
+                existing = {(o, db.as_utc(t)) for o, t in conn.execute(select(table.c[owner], table.c.captured_at))}
+                rows = [r for r in rows if (r[owner], db.as_utc(r["captured_at"])) not in existing]
                 if rows:
                     for i in range(0, len(rows), 5000):
                         conn.execute(insert(table), rows[i : i + 5000])

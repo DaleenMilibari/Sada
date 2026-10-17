@@ -62,6 +62,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger("sada.api")
 
 
+def _collector_configured() -> bool:
+    return bool(config.YOUTUBE_API_KEY or config.INSTAGRAM_ENABLED or config.X_ENABLED)
+
+
 async def _collector_loop() -> None:
     while True:
         try:
@@ -79,7 +83,7 @@ async def lifespan(_app: FastAPI):
         patterns = behavior_analysis_agent.run()
         logger.info("Pattern store was empty - built %d pattern(s) on startup.", len(patterns))
     collector_task = None
-    if config.COLLECTOR_SCHEDULE_ENABLED and (config.YOUTUBE_API_KEY or config.INSTAGRAM_ENABLED):
+    if config.COLLECTOR_SCHEDULE_ENABLED and _collector_configured():
         collector_task = asyncio.create_task(_collector_loop())
     logger.info(
         "Sada API started (env=%s, auth=%s, cors=%s, db=%s, collector schedule=%s)",
@@ -119,6 +123,9 @@ def _run_llm_step(fn, *args):
         return fn(*args)
     except llm_client.MissingApiKeyError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except llm_client.DeadlineExceededError:
+        logger.warning("LLM-backed step %s timed out", getattr(fn, "__qualname__", fn))
+        raise HTTPException(status_code=504, detail="The AI model took too long to answer. Please try again.")
     except Exception:
         logger.exception("LLM-backed step %s failed", getattr(fn, "__qualname__", fn))
         raise HTTPException(status_code=502, detail="The AI model request failed. Please try again.")
@@ -192,10 +199,15 @@ def diagnose_awj_sada(req: AwjDiagnosisRequest):
     return _run_llm_step(diagnostic_recommendation_agent.diagnose_awj_topic, req.topic)
 
 
+MAX_SIGNAL_POINTS = 20_000  # ~55 hours at a 10 s sampling interval
+
+
 @api.post("/broadcast/detect-clips", response_model=list[ClipOpportunity])
 def detect_clips(signal: list[BroadcastSignalPoint] | None = None):
     if signal is None:
         return live_clip_detection_agent.run()
+    if len(signal) > MAX_SIGNAL_POINTS:
+        raise HTTPException(status_code=422, detail=f"A signal may have at most {MAX_SIGNAL_POINTS} points.")
     broadcast = live_clip_detection_agent.load_broadcast()
     broadcast["signal"] = [p.model_dump() for p in signal]
     return live_clip_detection_agent.detect_clip_opportunities(broadcast)
@@ -246,8 +258,8 @@ def get_collector_status():
 
 @api.post("/collector/run", status_code=202)
 def trigger_collector_run(background_tasks: BackgroundTasks):
-    if not (config.YOUTUBE_API_KEY or config.INSTAGRAM_ENABLED):
-        raise HTTPException(status_code=503, detail="No data source configured (YOUTUBE_API_KEY / META_ACCESS_TOKEN).")
+    if not _collector_configured():
+        raise HTTPException(status_code=503, detail="No data source configured (YOUTUBE_API_KEY / META_ACCESS_TOKEN / X_BEARER_TOKEN).")
     status = repository.collector_status(run_limit=1)
     if status["runs"] and status["runs"][0]["status"] == "running":
         raise HTTPException(status_code=409, detail="A collector run is already in progress.")

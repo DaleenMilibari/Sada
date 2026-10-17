@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from backend import config, db, repository
 from backend.agents import data_collector_agent as collector
@@ -14,7 +14,7 @@ NOW = datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc)
 
 
 class FakeX:
-    """In-memory X API v2: user lookup + user timeline (newest first)."""
+    """In-memory X API v2: user lookup, user timeline and full-archive search (newest first)."""
 
     def __init__(self):
         self.users: dict[str, dict] = {}
@@ -22,6 +22,7 @@ class FakeX:
         self.requests: list[httpx.Request] = []
         self.error_status: int | None = None
         self.credit_pages: int | None = None  # timeline pages served before credits run out
+        self.timeline_limit: int | None = None  # the real timeline only reaches the latest ~3,200 tweets
 
     def add_user(self, username, user_id, followers=1000):
         self.users[username.lower()] = {
@@ -54,9 +55,11 @@ class FakeX:
             return httpx.Response(200, json={"data": found} if found else {})
         if request.url.path == "/2/tweets/search/recent":  # audience step: no replies in these fixtures
             return httpx.Response(200, json={"meta": {"result_count": 0}})
+        if request.url.path == "/2/tweets/search/all":
+            return self._archive(params)
         user_id = re.fullmatch(r"/2/users/(\d+)/tweets", request.url.path).group(1)
         assert params["exclude"] == "retweets,replies"
-        posts = self.posts[user_id]
+        posts = self.posts[user_id][: self.timeline_limit]
         if self.credit_pages is not None:
             if self.credit_pages == 0:
                 return httpx.Response(402, json={"title": "Payment Required", "detail": "credits depleted"})
@@ -77,6 +80,23 @@ class FakeX:
             body["meta"]["next_token"] = str(start + size)
         return httpx.Response(200, json=body)
 
+    def _archive(self, params) -> httpx.Response:
+        username = re.fullmatch(r"from:(\w+) -is:retweet -is:reply", params["query"]).group(1)
+        user_id = self.users[username.lower()]["id"]
+        lo, hi = (params[k].replace("Z", ".000Z") for k in ("start_time", "end_time"))
+        posts = [p for p in self.posts[user_id] if lo <= p["created_at"] < hi]
+        start, size = int(params.get("next_token", 0)), int(params["max_results"])
+        page = posts[start : start + size]
+        body = {"meta": {"result_count": len(page)}}
+        if page:
+            body["data"] = page
+        if start + size < len(posts):
+            body["meta"]["next_token"] = str(start + size)
+        return httpx.Response(200, json=body)
+
+    def archive_calls(self):
+        return [r for r in self.requests if r.url.path == "/2/tweets/search/all"]
+
     def timeline_calls(self):
         return [r for r in self.requests if r.url.path.endswith("/tweets")]
 
@@ -90,6 +110,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(config, "X_TOTAL_POST_BUDGET", 6000)
     monkeypatch.setattr(config, "X_MAX_POSTS_PER_RUN", 4000)
     monkeypatch.setattr(config, "X_MAX_POSTS_PER_ACCOUNT", 600)
+    monkeypatch.setattr("backend.agents.x_client.ARCHIVE_MIN_INTERVAL_S", 0)
     return FakeX()
 
 
@@ -183,7 +204,7 @@ def test_posts_already_billed_are_kept_when_credit_runs_out(fake, monkeypatch):
     _both_accounts(fake)
     for n in range(250):
         fake.add_post("100", str(1000 + n), timedelta(hours=2 * (250 - n)))
-    fake.credit_pages = 2
+    fake.credit_pages = 3  # backfill alternates accounts: 100 posts, ekhbariya's empty page, 100 posts
 
     result = _run(fake)
 
@@ -292,3 +313,62 @@ def test_x_diagnosis_refuses_counts_frozen_too_young(fake):
     post = repository.get_video("903")
 
     assert diag.build_video_diagnosis_context(post)["low_confidence"] is True
+
+
+def test_limited_budget_reads_new_posts_everywhere_then_evens_out_the_backfill(fake, monkeypatch):
+    from backend.sba_channels import SBA_X_ACCOUNTS
+
+    two = SBA_X_ACCOUNTS[:2]
+    monkeypatch.setattr(x_collector, "SBA_X_ACCOUNTS", two)
+    deep, shallow = two[0]["entity_key"], two[1]["entity_key"]
+    calls = []
+    edges = {deep: NOW - timedelta(days=10), shallow: NOW - timedelta(days=2)}
+
+    monkeypatch.setattr(x_collector, "_stored_accounts", lambda engine: {
+        a["entity_key"]: {"channel_id": a["entity_key"], "handle": "@" + a["username"], "updated_at": NOW} for a in two
+    })
+    monkeypatch.setattr(x_collector, "_edge_post", lambda engine, cid, newest: (f"{cid}-edge", NOW if newest else edges[cid]))
+    monkeypatch.setattr(x_collector, "posts_read_so_far", lambda engine: 0)
+    monkeypatch.setattr(x_collector, "_store_posts", lambda engine, rows, now: (len(rows), 0))
+    monkeypatch.setattr(config, "X_MAX_POSTS_PER_RUN", 1000)
+
+    class Client:
+        """Each backfill page holds 10 posts, one per day, going back from the window's edge."""
+
+        def __init__(self):
+            self.cursor = dict(edges)
+
+        def users_by_username(self, names):
+            return {}, []
+
+        def user_posts(self, channel_id, max_results, pagination_token=None, **window):
+            if "since_id" in window:
+                calls.append((channel_id, "new"))
+                return [], None
+            calls.append((channel_id, "backfill"))
+            start = self.cursor[channel_id]
+            self.cursor[channel_id] = start - timedelta(days=10)
+            posts = [{"id": f"{channel_id}{i}", "created_at": (start - timedelta(days=i + 1)).isoformat().replace("+00:00", "Z")} for i in range(10)]
+            return posts, "more"
+
+    result = x_collector.collect(db.get_engine(), Client(), NOW, NOW - timedelta(days=60))
+    assert calls[:2] == [(deep, "new"), (shallow, "new")]  # every account's new posts first
+    backfill = [c for c, kind in calls if kind == "backfill"]
+    assert backfill[0] == shallow  # the shorter history goes first ...
+    assert backfill[1] == deep  # ... until it is as deep as the other, then they alternate
+    assert backfill.count(shallow) == backfill.count(deep)
+    assert "budget" in result["errors"][0]
+
+
+def test_backfill_continues_in_the_archive_once_the_timeline_runs_out(fake):
+    _both_accounts(fake)
+    for n in range(300):  # one post every 4 h: 50 days
+        fake.add_post("100", str(5000 + n), timedelta(hours=4 * (300 - n)))
+    fake.timeline_limit = 120  # the timeline stops ~20 days back, like a busy account's 3,200 cap
+
+    result = _run(fake)
+
+    assert result["x_posts_read"] == 300 and result["new_videos"] == 300  # every post once, none twice
+    assert fake.archive_calls(), "the rest came from full-archive search"
+    with db.get_engine().connect() as conn:
+        assert conn.execute(select(func.count()).select_from(db.video_snapshots)).scalar() == 300

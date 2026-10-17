@@ -22,7 +22,7 @@ What's done, what's open, and what's deliberately left for after the hackathon. 
 ## 🔄 Open
 
 1. **Instagram go-live:** Meta setup + verified SBA handles ([team.md](team.md#instagram-go-live-one-person-1-hour)).
-2. **X in production:** add `X_BEARER_TOKEN` on Render (it isn't in `render.yaml` yet).
+2. **X in production:** fill `X_BEARER_TOKEN` on Render (declared in `render.yaml`) once the X account has credit.
 3. **Load test:** run 50 users against `/api/analytics/summary` and `/api/trending`, and put p95 latency and the error rate in the pitch.
 
 ## 🗂️ After the hackathon

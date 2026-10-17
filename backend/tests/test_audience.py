@@ -312,3 +312,29 @@ def test_diagnosis_includes_what_the_posts_audience_said(engine):
     assert factor["evidence_url_or_ref"] == "https://example.com/v1" and factor["recommendation"]
     add_post(engine, "v2")
     assert diag._audience_factor({"video_id": "v2", "title": "", "url": ""}, 0.8) is None  # too few replies: no claim
+
+
+def test_theme_members_given_as_strings_still_count(engine, monkeypatch):
+    add_post(engine, "v1")
+    for i in range(3):
+        add_comment(engine, f"r{i}", "v1", sentiment="neutral", intent="request", likes=10 - i, text=f"نبي برامج قديمة {i}")
+    answer = {"themes": [{"title": "برامج أرشيفية", "kind": "request", "recommendation": "أعد بثها", "topic": "other",
+                          "members": ["0", "1", "2", "x"]}]}
+    monkeypatch.setattr(llm_client, "generate_json", lambda p: json.dumps(answer))
+    result = audience_agent.build_themes(days=30)
+    assert [t["count"] for t in result["themes"]] == [3]
+
+
+def test_classification_stops_once_every_key_is_out_of_quota(engine, monkeypatch):
+    add_post(engine, "v1")
+    for i in range(3 * audience_agent.BATCH_SIZE):
+        add_comment(engine, f"c{i}", "v1")
+    calls = []
+
+    def exhausted(prompt):
+        calls.append(prompt)
+        raise llm_client.QuotaExhaustedError("all keys out")
+
+    monkeypatch.setattr(llm_client, "generate_json", exhausted)
+    assert audience_agent.classify_pending(10_000) == 0
+    assert len(calls) == 1  # the remaining batches wait for the next run

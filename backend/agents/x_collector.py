@@ -30,7 +30,7 @@ from sqlalchemy import func, insert, select
 from sqlalchemy.engine import Engine
 
 from backend import config, db
-from backend.agents.x_client import MIN_PAGE, XClient, parse_timestamp
+from backend.agents.x_client import ARCHIVE_MIN_PAGE, MAX_PAGE, MIN_PAGE, XClient, parse_timestamp
 from backend.sba_channels import BY_ENTITY, SBA_X_ACCOUNTS
 from backend.topics import classify_by_rules
 
@@ -180,42 +180,80 @@ def collect(engine: Engine, client: XClient, now: datetime, cutoff: datetime, re
             logger.warning(msg)
             result["errors"].append(msg)
 
+    accounts: list[tuple[str, str, str]] = []  # (channel_id, username, default_topic)
     for entry in SBA_X_ACCOUNTS:
-        if remaining < MIN_PAGE:
-            result["errors"].append("x: run post budget reached (X_MAX_POSTS_PER_RUN) - remaining accounts skipped")
-            break
         entity_key = entry["entity_key"]
         if (user := looked_up.get(entry["username"].lower())) is not None:
             _store_channel(engine, user, entity_key, now)  # new account, or its daily follower refresh
-            channel_id, username = user["id"], user["username"]
+            accounts.append((user["id"], user["username"], BY_ENTITY[entity_key]["default_topic"]))
         elif entity_key in stored:
-            channel_id, username = stored[entity_key]["channel_id"], stored[entity_key]["handle"].lstrip("@")
-        else:
-            continue  # not found - already reported
+            accounts.append((stored[entity_key]["channel_id"], stored[entity_key]["handle"].lstrip("@"), BY_ENTITY[entity_key]["default_topic"]))
+        # else: not found - already reported
 
-        default_topic = BY_ENTITY[entity_key]["default_topic"]
-        newest = _edge_post(engine, channel_id, newest=True)
-        oldest = _edge_post(engine, channel_id, newest=False)
-        windows: list[dict[str, Any]] = []
+    read: dict[str, int] = {}
+
+    def read_page(account: tuple[str, str, str], window: dict[str, Any], token: str | None) -> tuple[list[dict[str, Any]], str | None]:
+        """One page (timeline, or full-archive search when `window` has an end_time) within the
+        account's and the run's caps; stored as soon as it arrives."""
+        nonlocal remaining
+        channel_id, username, default_topic = account
+        archive = "end_time" in window
+        cap = min(MAX_PAGE, config.X_MAX_POSTS_PER_ACCOUNT - read.get(channel_id, 0), remaining)
+        if cap < (ARCHIVE_MIN_PAGE if archive else MIN_PAGE):
+            return [], None
+        if archive:
+            posts, token = client.archive_posts(username, cap, pagination_token=token, **window)
+        else:
+            posts, token = client.user_posts(channel_id, cap, pagination_token=token, **window)
+        read[channel_id] = read.get(channel_id, 0) + len(posts)
+        remaining -= len(posts)
+        rows = [r for p in posts if (r := parse_post(p, channel_id, username, default_topic, now)) is not None]
+        new, updated = _store_posts(engine, rows, now)
+        result["new"] += new
+        result["updated"] += updated
+        return rows, (token if posts else None)
+
+    # Pass 1 - what's new since the last run, for every account first, so "now" stays fresh everywhere.
+    backfill: list[dict[str, Any]] = []
+    skipped = False
+    for account in accounts:
+        newest = _edge_post(engine, account[0], newest=True)
         if newest is None:
-            windows.append({"start_time": cutoff})  # first run: backfill now -> cutoff
-        else:
-            windows.append({"since_id": newest[0]})
-            if oldest[1] > cutoff + timedelta(days=1):
-                windows.append({"until_id": oldest[0], "start_time": cutoff})  # keep going back
+            backfill.append({"edge": now, "account": account, "window": {"start_time": cutoff}, "token": None})
+            continue  # first run: the backfill below reads now -> cutoff
+        if remaining < MIN_PAGE:
+            skipped = True
+            break
+        token: str | None = None
+        while True:
+            _, token = read_page(account, {"since_id": newest[0]}, token)
+            if not token:
+                break
+        oldest = _edge_post(engine, account[0], newest=False)
+        if oldest[1] > cutoff + timedelta(days=1):
+            backfill.append({"edge": oldest[1], "account": account,
+                             "window": {"until_id": oldest[0], "start_time": cutoff}, "token": None})
 
-        cap = min(config.X_MAX_POSTS_PER_ACCOUNT, remaining)
-        read = 0
-        for window in windows:
-            token: str | None = None
-            while cap - read >= MIN_PAGE:
-                posts, token = client.user_posts(channel_id, cap - read, pagination_token=token, **window)
-                read += len(posts)
-                remaining -= len(posts)
-                rows = [r for p in posts if (r := parse_post(p, channel_id, username, default_topic, now)) is not None]
-                new, updated = _store_posts(engine, rows, now)
-                result["new"] += new
-                result["updated"] += updated
-                if not token or not posts:
-                    break
+    # Pass 2 - backfill toward the cutoff one page at a time, always for the account whose history
+    # is currently shortest, so a limited budget evens out how far back the accounts reach.
+    while backfill:
+        if remaining < MIN_PAGE:
+            skipped = True
+            break
+        item = max(backfill, key=lambda b: b["edge"])
+        rows, item["token"] = read_page(item["account"], item["window"], item["token"])
+        if rows:
+            item["edge"] = min(r["published_at"] for r in rows)
+        if item["token"]:
+            continue
+        cap_left = config.X_MAX_POSTS_PER_ACCOUNT - read.get(item["account"][0], 0) >= ARCHIVE_MIN_PAGE
+        if "end_time" not in item["window"] and cap_left and item["edge"] > cutoff + timedelta(days=1):
+            # The timeline ended before the cutoff: it only reaches the latest ~3,200 tweets.
+            # Continue from the oldest post stored so far through full-archive search.
+            item["window"] = {"start_time": cutoff, "end_time": item["edge"]}
+            continue
+        backfill.remove(item)  # window complete, or the account's cap reached
+
+    if skipped:
+        result["errors"].append("x: post budget reached (X_MAX_POSTS_PER_RUN / X_TOTAL_POST_BUDGET) - remaining backfill waits for the next run")
     return result

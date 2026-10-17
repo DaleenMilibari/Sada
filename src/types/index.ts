@@ -106,6 +106,7 @@ export interface AnalyticsSummary {
   by_content_type: { platform: Platform; content_type: string; posts: number; median_performance_index: number }[];
   by_topic: { topic: string; label_ar: string; posts: number; median_performance_index: number }[];
   best_times: { platform: Platform; day_of_week: string; hour: number; median_performance_index: number; n: number }[];
+  best_times_coverage?: { platform: Platform; days: number; posts: number }[];
 }
 
 export interface CollectorRun {

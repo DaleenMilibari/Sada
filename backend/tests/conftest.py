@@ -34,3 +34,6 @@ def _no_real_api_keys(monkeypatch):
     monkeypatch.setattr(config, "INSTAGRAM_ENABLED", False)
     monkeypatch.setattr(config, "X_BEARER_TOKEN", "")
     monkeypatch.setattr(config, "X_ENABLED", False)
+    # Budgets a local backend/.env may tune for real collection - tests assume the defaults.
+    monkeypatch.setattr(config, "X_REPLY_BUDGET", 1000)
+    monkeypatch.setattr(config, "COLLECTOR_LOOKBACK_DAYS", 180)

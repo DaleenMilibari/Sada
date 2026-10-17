@@ -20,7 +20,7 @@ Deploy the **backend first** — the frontend needs its URL at build time.
    - `GEMINI_API_KEY` — Google AI Studio key.
    - `YOUTUBE_API_KEY` — Google Cloud key with "YouTube Data API v3" enabled (restrict it to that API).
    - `META_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ACCOUNT_ID` — from the Instagram setup ([DATA_COLLECTION.md](DATA_COLLECTION.md) section 3). Leave them empty to collect YouTube only; you can add them later and redeploy.
-   - `X_BEARER_TOKEN` — not in `render.yaml` yet: add it under the service's **Environment** tab ([DATA_COLLECTION.md](DATA_COLLECTION.md) section 5). Leave it out to skip X.
+   - `X_BEARER_TOKEN` — app-only X token ([DATA_COLLECTION.md](DATA_COLLECTION.md) section 5). Leave it empty to skip X; X alone is enough to start the collector.
    - `SADA_ACCESS_PASSWORD` — the team login password (use a long one; share it out-of-band).
    - `CORS_ORIGINS` — the Vercel URL, e.g. `https://sada.vercel.app` (comma-separate multiple, no trailing slash). You can set a placeholder and update it after step 2.
    - `SADA_SECRET_KEY` is generated automatically.
@@ -30,7 +30,9 @@ Deploy the **backend first** — the frontend needs its URL at build time.
    ```bash
    DATABASE_URL="<external url>" python -m backend.db_tools import backend/data/sba_youtube_seed.json.gz
    ```
-   After that the in-process collector keeps it fresh every 30 minutes. Check progress at
+   The seed carries everything already paid for: posts, snapshots, audience comments (incl. X replies), review labels
+   and follower counts, so production never re-buys X history. After that the in-process collector keeps it fresh every 30 minutes.
+   Set `X_TOTAL_POST_BUDGET` on Render above the number of X posts in the seed, or X stops immediately (budget counted from stored posts). Check progress at
    `GET /api/collector/status` (logged in).
 
 **Free Postgres expires 30 days after creation.** Before then, export (`python -m backend.db_tools export …` with the external URL) and either upgrade the plan or re-import into a new database.
@@ -71,12 +73,15 @@ See [backend/.env.example](backend/.env.example) for all variables. Key ones:
 | `SADA_LLM_RATE_LIMIT_PER_MINUTE` | `20` | Per-IP limit on Gemini-backed routes |
 | `SADA_LOGIN_RATE_LIMIT_PER_MINUTE` | `5` | Per-IP limit on login attempts |
 | `SADA_TRUSTED_PROXY_HOPS` | `0` (`1` on Render) | Proxies in front of the app, for real client IP |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Model for variants, diagnosis narratives, topics and comment classification |
+| `GEMINI_MODEL` | `gemini-3.8-flash` (falls back to `GEMINI_FALLBACK_MODEL`, default `gemini-3.5-flash,gemini-3.5-flash-lite`) | Model for variants, diagnosis narratives, topics and comment classification |
+| `GEMINI_TIMEOUT_SECONDS` | `30` | Max time for one Gemini request |
+| `GEMINI_DEADLINE_SECONDS` | `60` | Max time for the whole key/model rotation; past it the API answers 504 (or the agent's evidence-only fallback) |
 | `DATABASE_URL` | SQLite file | Set automatically by Render's Postgres |
 | `YOUTUBE_API_KEY` | empty | Enables the Data Collector agent |
 | `COLLECTOR_SCHEDULE_ENABLED` | `false` (`true` on Render) | Run the collector in-process every `COLLECTOR_INTERVAL_MINUTES` |
 | `COLLECTOR_QUOTA_PER_RUN` | `600` (`300` on Render) | YouTube units a run may spend (daily free quota 10,000) |
-| `COLLECTOR_LOOKBACK_DAYS` | `60` | Rolling window of uploads tracked per channel |
+| `COLLECTOR_LOOKBACK_DAYS` | `180` | Rolling window of uploads tracked per channel; also the history behind patterns and the best-time heatmap |
+| `COLLECTOR_MAX_VIDEOS_PER_CHANNEL` | `6000` | Cap per channel inside the window (the busiest channel uploads ~22/day) |
 | `META_ACCESS_TOKEN` | empty | Long-lived Meta user token; enables Instagram collection |
 | `INSTAGRAM_BUSINESS_ACCOUNT_ID` | empty | Our own Instagram business account id, used for Business Discovery lookups |
 | `META_GRAPH_API_VERSION` | `v23.0` | Graph API version |

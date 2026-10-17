@@ -47,12 +47,12 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 **Per platform:**
 - **YouTube:** views, likes, comments; refreshed on the age schedule above.
 - **Instagram:** likes (`NULL` when hidden) and comments, but **no views, reach or shares** for accounts we don't own. Reels map to `short`. Once an account is backfilled, runs re-read only the last 7 days.
-- **X:** each post is read **once**: new posts via `since_id`, older ones back to the cutoff. Impressions are stored as `view_count`, replies as `comment_count`. Reposts and replies are excluded. `X_TOTAL_POST_BUDGET` and `X_REPLY_BUDGET` are hard stops across all runs.
+- **X:** each post is read **once**. New posts (`since_id`) are read for every account first; the remaining budget then backfills toward the cutoff one page at a time, always for the account with the shortest history, so a small budget evens the accounts out. The user timeline only reaches an account's ~3,200 latest tweets (under two weeks for a busy news account), so the backfill continues through full-archive search (`/2/tweets/search/all`) from the oldest stored post. Impressions are stored as `view_count`, replies as `comment_count`. Reposts and replies are excluded. `X_TOTAL_POST_BUDGET` and `X_REPLY_BUDGET` are hard stops across all runs.
 - **Audience:** YouTube top comments for the most-viewed videos published 1–7 days ago, and X replies to the most-seen posts from the last ~7 days. **No author name, handle or id is stored.**
 
 **Analysis input for other agents:** `backend/repository.analysis_records()`. One record per post, with Riyadh-time `publish_hour` / `day_of_week`, `engagement_rate`, and **`performance_index`**: the post's main metric (views on YouTube, impressions on X, likes + comments on Instagram) ÷ its own account + content type's median. Posts too young to compare are excluded. X posts use their age when measured, since they are never re-read.
 
-**Acceptance criteria (met):** the first run backfills 60 days for all 9 YouTube channels (2,901 videos, 131 quota units); the next run is incremental (19 units). Quota exhaustion, concurrent runs, expired tokens, rate limits and the X budget are all tested against simulated APIs.
+**Acceptance criteria (met):** the first run backfills 60 days for all 9 YouTube channels (2,901 videos, 131 quota units); the next run is incremental (19 units). Extending the window to 180 days backfilled all 9 channels to 7,777 videos in one run (324 units). Quota exhaustion, concurrent runs, expired tokens, rate limits and the X budget are all tested against simulated APIs.
 
 ---
 
@@ -68,7 +68,7 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 - **Reasoning task:** Find which attributes correlate with a higher or lower `performance_index`, and separate real effects from noise.
 - **Decision:** A slice is surfaced only with `n ≥ MIN_SAMPLES` (10), a lift of at least `MIN_LIFT` (20%) and `t ≥ MIN_T_STAT` (2.5). Dimensions: content type, publish-hour bucket and day of week, topic, `channel|topic`, and a cross-platform comparison.
 - **Action/output:** `Pattern[]`: `{pattern, supporting_metric, confidence, affected_content_types}` plus `pattern_id`, `dimension`, `slice_key`, `lift_pct` and `source` (`real_youtube_sba`, `real_instagram_sba`, `real_x_sba`, `real_sba`, `real_hajj_1445_sba`, `real_awj_sada`).
-- **Memory/state:** `backend/store/pattern_store.json`. Each run **replaces** the store, so a pattern that stops being significant disappears.
+- **Memory/state:** `backend/store/pattern_store.json`. Each run **replaces** the store atomically, so a pattern that stops being significant disappears and readers never see a half-written file. `pattern_id` includes the source, so the same slice on two platforms is two patterns.
 - **Evidence:** Each pattern cites its sample size, lift and t statistic.
 - **Failure/fallback:** Too little data for a slice → no pattern for it. The Hajj and AWJ sources are too small to t-test, so they get plain descriptive comparisons with capped confidence. No database → no real patterns, never fabricated ones.
 
@@ -82,12 +82,13 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 - **Input:** `DraftContent`: caption/headline options, content type, topic, optional `channel_options` (entity keys).
 - **Trigger:** `POST /api/optimize` from the Optimizer view.
 - **Available tools:** The pattern store; a scoring function; Gemini to generate 2–4 variants when none are supplied.
-- **Reasoning task:** Score each variant × account × slot against the real patterns, comparing candidates with each other rather than in isolation.
+- **Reasoning task:** Score each variant × account × slot against the real patterns, comparing candidates with each other rather than in isolation. A pattern measured on one platform (`real_youtube_sba`, `real_x_sba`, `real_instagram_sba`) only scores candidates for that platform.
 - **Decision:** The winning variant, account and time window. Time windows come from the real best hours.
 - **Action/output:** `{recommended_variant, predicted_engagement, recommended_platform, recommended_time, ranked_alternatives[], evidence[]}`. `predicted_engagement` is a ranking index (100 = baseline), not a forecast.
 - **Memory/state:** Stateless per call.
 - **Evidence:** Every recommendation points to the pattern(s) it relied on.
-- **Failure/fallback:** No relevant pattern → say so, and fall back to the highest-confidence general pattern, flagged as lower confidence.
+- **Failure/fallback:** No relevant pattern → say so, and fall back to the highest-confidence general pattern (preferring one from the recommended platform), flagged as lower confidence. Gemini unavailable → the original text is scored on its own and the evidence says so; with no original text either, the API answers 503/502/504.
+- **Limits:** at most 8 variants, 6 platforms and 30 accounts per request.
 
 ---
 
@@ -143,7 +144,7 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 - **Action/output:** `DiagnosisResult` = `{diagnosis, contributing_factors[{reason, supporting_metric, evidence_source_title, evidence_url_or_ref, confidence}], recommendations[], low_confidence}`.
 - **Memory/state:** Stateless per call.
 - **Evidence:** Every factor links to real comparable posts (`evidence_url_or_ref` = the post's `url`).
-- **Failure/fallback:** No comparables → `low_confidence: true`. Never an invented reason. No Gemini key or a model error → evidence-only wording built from the same factors.
+- **Failure/fallback:** No comparables → `low_confidence: true`. Never an invented reason. No Gemini key, a model error or a malformed reply (all three endpoints) → evidence-only wording built from the same factors.
 
 ---
 
@@ -160,7 +161,7 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 - **Action/output:** `AudienceSummary`: per-channel sentiment, intents with example comments, most-discussed posts, follower growth.
 - **Memory/state:** Labels are stored on `audience_comments` (`sentiment`, `intent`, `classified_at`).
 - **Evidence:** Every share comes with its sample size. Every intent lists real example comments linked to their post.
-- **Failure/fallback:** Without a Gemini key comments stay unclassified, and the summary shows `classified < comments`. Unclassified or invalid labels are **never counted as neutral**. Fewer than 10 classified comments → shares are `null`.
+- **Failure/fallback:** Without a Gemini key, or once every key is out of quota, the run stops classifying and the rest wait for the next run; the summary shows `classified < comments`. Unclassified or invalid labels are **never counted as neutral**. Fewer than 10 classified comments → shares are `null`.
 - **Privacy:** No author data exists in the database. Output is aggregate only (PDPL).
 
 ---
@@ -175,7 +176,7 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 - **Reasoning task:** Separate a real spike from normal fluctuation using a rolling baseline, and tie it to the segment it happened in.
 - **Action/output:** `ClipOpportunity[]` = `{start_time, end_time, segment_label, spike_magnitude, confidence}`, ranked.
 - **Evidence:** Deviation from the baseline plus the aligned segment.
-- **Failure/fallback:** A noisy or flat signal → no clips.
+- **Failure/fallback:** A noisy or flat signal, or a zero baseline → no clips. A posted signal is sorted by time first and capped at 20,000 points.
 
 ---
 
@@ -186,3 +187,4 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 - Every recommendation or diagnosis traces back to a specific number, sample size or real post.
 - Missing is never zero: hidden likes, Instagram views and unclassified comments stay `null`.
 - Compare platforms only on `performance_index`.
+- Every Gemini call has a per-request timeout and an overall deadline (`GEMINI_TIMEOUT_SECONDS`, `GEMINI_DEADLINE_SECONDS`), so no API request hangs on the model.

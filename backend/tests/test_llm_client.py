@@ -84,3 +84,31 @@ def test_overloaded_model_is_retried_then_skipped(fake, monkeypatch):
     monkeypatch.setattr(llm_client, "_client_for", busy_once)
     assert llm_client.generate_json("p") == '{"by": "k1/flash"}'  # one short retry, same key/model
     assert llm_client._exhausted == {}  # a spike is not treated as an exhausted quota
+
+
+def test_timed_out_request_moves_on_to_the_next_key(fake, monkeypatch):
+    log, _ = fake
+    monkeypatch.setattr(llm_client, "OVERLOAD_BACKOFF_S", 0)
+    original = llm_client._client_for
+
+    class ReadTimeout(Exception):  # the shape httpx raises
+        pass
+
+    def slow_k1(key):
+        client = original(key)
+        if key == "k1":
+            def hang(model, contents, config):
+                log.append((key, model))
+                raise ReadTimeout("timed out")
+            client.models.generate_content = hang
+        return client
+
+    monkeypatch.setattr(llm_client, "_client_for", slow_k1)
+    assert llm_client.generate_json("p") == '{"by": "k2/flash"}'
+    assert llm_client._exhausted == {}  # a timeout is not an exhausted quota
+
+
+def test_rotation_stops_at_the_deadline(fake, monkeypatch):
+    monkeypatch.setattr(llm_client, "DEADLINE_S", -1)
+    with pytest.raises(llm_client.DeadlineExceededError):
+        llm_client.generate_json("p")

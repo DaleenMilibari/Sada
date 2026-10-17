@@ -116,7 +116,7 @@ const CATEGORY_TABS: {
 ];
 
 const REFRESH_MS = 60_000;
-const DAYS_OPTIONS = [7, 30, 60];
+const DAYS_OPTIONS = [7, 30, 90, 180];
 const PLATFORM_TABS: { key: Platform | 'all'; label: string }[] = [
   { key: 'all', label: 'الكل' },
   { key: 'youtube', label: 'يوتيوب' },
@@ -242,8 +242,14 @@ function Heatmap({ summary, platform }: { summary: AnalyticsSummary; platform: P
   }
   const top = [...cells.values()].sort((a, b) => b.median_performance_index - a.median_performance_index).slice(0, 3);
   const dayLabel = (key: string) => DAYS.find((d) => d.key === key)?.label;
+  const coverage = summary.best_times_coverage?.find((c) => c.platform === platform);
   return (
     <div>
+      {coverage && (
+        <p className="text-[11px] text-slate-500 font-arabic mb-3">
+          مبنية على كل البيانات المجمّعة: آخر {coverage.days} يوماً ({coverage.posts.toLocaleString('ar-SA')} منشوراً)، بغض النظر عن الفترة المختارة أعلاه.
+        </p>
+      )}
       <div className="flex flex-wrap gap-2 mb-4">
         {top.map((c, i) => (
           <div key={`${c.day_of_week}-${c.hour}`} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-100">

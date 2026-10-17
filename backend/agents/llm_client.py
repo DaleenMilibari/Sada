@@ -28,6 +28,10 @@ _clients: dict[str, object] = {}
 _exhausted: dict[tuple[str, str], float] = {}  # (key, model) -> monotonic time it ran out
 _lock = threading.Lock()
 EXHAUSTED_COOLDOWN_S = 3600
+# One Gemini request may take at most this long; the whole key/model rotation at most
+# DEADLINE_S, so an API request never hangs on a slow or stuck model.
+REQUEST_TIMEOUT_S = float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "30"))
+DEADLINE_S = float(os.environ.get("GEMINI_DEADLINE_SECONDS", "60"))
 
 
 class MissingApiKeyError(RuntimeError):
@@ -36,6 +40,10 @@ class MissingApiKeyError(RuntimeError):
 
 class QuotaExhaustedError(RuntimeError):
     """Every configured key is out of quota on every configured model."""
+
+
+class DeadlineExceededError(RuntimeError):
+    """The key/model rotation ran past DEADLINE_S without an answer."""
 
 
 def _load_env() -> None:
@@ -66,8 +74,11 @@ def _client_for(key: str):
     with _lock:
         if key not in _clients:
             from google import genai
+            from google.genai import types
 
-            _clients[key] = genai.Client(api_key=key)
+            _clients[key] = genai.Client(
+                api_key=key, http_options=types.HttpOptions(timeout=int(REQUEST_TIMEOUT_S * 1000))
+            )
         return _clients[key]
 
 
@@ -77,10 +88,10 @@ def get_client():
 
 
 def get_model() -> str:
-    return os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    return os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 
 
-DEFAULT_FALLBACKS = "gemini-2.5-flash-lite,gemini-3.5-flash-lite,gemini-3.5-flash"
+DEFAULT_FALLBACKS = "gemini-3.5-flash,gemini-3.5-flash-lite"  # 2.5 models are closed to new keys
 
 
 def get_models() -> list[str]:
@@ -96,8 +107,10 @@ OVERLOAD_BACKOFF_S = 2.0
 
 
 def _is_overloaded(e: Exception) -> bool:
-    """A temporary capacity spike (503/500) - worth a short retry, then another model."""
-    return getattr(e, "code", None) in (500, 503) or "UNAVAILABLE" in str(e)
+    """A temporary capacity spike (500/503/504) or a timed-out request - worth a short retry, then another model."""
+    if isinstance(e, TimeoutError) or "timeout" in type(e).__name__.lower():
+        return True
+    return getattr(e, "code", None) in (500, 503, 504) or "UNAVAILABLE" in str(e) or "DEADLINE_EXCEEDED" in str(e)
 
 
 def _is_unavailable(e: Exception) -> bool:
@@ -119,6 +132,8 @@ def generate_json(prompt: str) -> str:
             if ran_out is not None and now - ran_out < EXHAUSTED_COOLDOWN_S:
                 continue
             for attempt in range(OVERLOAD_RETRIES + 1):
+                if time.monotonic() - now > DEADLINE_S:
+                    raise DeadlineExceededError(f"Gemini did not answer within {DEADLINE_S:.0f}s: {last}")
                 try:
                     response = _client_for(key).models.generate_content(
                         model=model,

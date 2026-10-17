@@ -49,8 +49,9 @@ DATABASE_URL = os.environ.get("DATABASE_URL") or f"sqlite:///{_DEFAULT_SQLITE.as
 # --- Data Collector agent (YouTube) ------------------------------------------
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 # Rolling window of uploads to track per channel (SBA channels hold ~276K videos in total).
-COLLECTOR_LOOKBACK_DAYS = int(os.environ.get("COLLECTOR_LOOKBACK_DAYS", "60"))
-COLLECTOR_MAX_VIDEOS_PER_CHANNEL = int(os.environ.get("COLLECTOR_MAX_VIDEOS_PER_CHANNEL", "3000"))
+# 180 days covers every weekday/hour slot many times over; the busiest channel uploads ~22 videos/day.
+COLLECTOR_LOOKBACK_DAYS = int(os.environ.get("COLLECTOR_LOOKBACK_DAYS", "180"))
+COLLECTOR_MAX_VIDEOS_PER_CHANNEL = int(os.environ.get("COLLECTOR_MAX_VIDEOS_PER_CHANNEL", "6000"))
 # YouTube API units one run may spend (free daily quota is 10,000).
 COLLECTOR_QUOTA_PER_RUN = int(os.environ.get("COLLECTOR_QUOTA_PER_RUN", "600"))
 # Videos per run whose rule-based topic is refined by Gemini (0 disables).

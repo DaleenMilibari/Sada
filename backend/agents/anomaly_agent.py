@@ -17,6 +17,7 @@ means no alert (insufficient evidence), never a guess.
 
 from __future__ import annotations
 
+import math
 import statistics
 import threading
 import time
@@ -84,6 +85,11 @@ def _severity(kind: str, ratio: float) -> str:
     if kind == "spike":
         return "high" if ratio >= HIGH_SPIKE_RATIO else "medium"
     return "high" if ratio <= HIGH_DROP_RATIO else "medium"
+
+
+def _deviation(ratio: float) -> float:
+    """How far from normal, in either direction: 3x and 1/3x rank the same; a full stall ranks highest."""
+    return max(ratio, 1 / ratio) if ratio > 0 else math.inf
 
 
 def _classify(ratio: float) -> str | None:
@@ -211,7 +217,8 @@ def detect(days: int = 7, now: datetime | None = None) -> list[dict[str, Any]]:
         if len(pts) >= 3 and age_days <= PLATEAU_AGE_DAYS:
             (a0, v0), (a1, v1), (a2, v2) = pts[-3:]
             if a2 - a1 >= MIN_VELOCITY_INTERVAL_H and a1 - a0 >= MIN_VELOCITY_INTERVAL_H:
-                prev, recent = (v1 - v0) / (a1 - a0), (v2 - v1) / (a2 - a1)
+                # Platforms sometimes correct counts downward (removed spam views): a negative rate is a stall.
+                prev, recent = (v1 - v0) / (a1 - a0), max(0.0, (v2 - v1) / (a2 - a1))
                 if prev >= MIN_VELOCITY_EXPECTED[metric]:
                     ratio = recent / prev
                     kind = _classify(ratio)
@@ -223,7 +230,7 @@ def detect(days: int = 7, now: datetime | None = None) -> list[dict[str, Any]]:
                             f"{recent:,.1f}/ساعة بعد {prev:,.1f}/ساعة في القياس السابق ({ratio:.1f}×).",
                         ))
 
-    alerts.sort(key=lambda a: (a["severity"] != "high", -max(a["ratio"], 1 / a["ratio"] if a["ratio"] else 0)))
+    alerts.sort(key=lambda a: (a["severity"] != "high", -_deviation(a["ratio"])))
     return alerts[:MAX_ALERTS]
 
 

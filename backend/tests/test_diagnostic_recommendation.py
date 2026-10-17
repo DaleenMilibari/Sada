@@ -217,3 +217,28 @@ def test_diagnose_video_endpoint(real_engine, monkeypatch):
         res = client.post("/api/diagnose/video", json={"video_id": "under"})
         assert res.status_code == 200 and res.json()["contributing_factors"]
         assert client.post("/api/diagnose/video", json={"video_id": "missing"}).status_code == 404
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        '{"diagnosis": "تشخيص", "recommendations": "توصية واحدة"}',  # a string, not a list
+        '{"diagnosis": "", "recommendations": ["توصية"]}',
+        '["not", "an", "object"]',
+        "not json",
+    ],
+)
+def test_malformed_llm_reply_never_reaches_the_user(real_engine, monkeypatch, reply):
+    _seed_peers(real_engine)
+    _add(real_engine, "under", views=2000, hour_utc=0, duration=200, title="خبر عادي")
+    monkeypatch.setattr(diag.llm_client, "generate_json", lambda p: reply)
+    result = diag.diagnose_video("under")
+    assert result["diagnosis"].strip()
+    assert result["recommendations"] and all(len(r) > 1 for r in result["recommendations"])
+
+
+def test_awj_diagnosis_falls_back_to_evidence_without_llm(monkeypatch):
+    monkeypatch.setattr(diag.llm_client, "generate_json", lambda p: (_ for _ in ()).throw(RuntimeError("no key")))
+    result = diag.diagnose_awj_topic("podcast_reach")
+    assert result["low_confidence"] is False
+    assert result["diagnosis"] and result["recommendations"] and result["contributing_factors"]

@@ -138,3 +138,17 @@ def test_endpoint_contract(engine, monkeypatch):
             assert key in alert
         assert alert["video"]["url"] == "https://x/spike"
         assert client.get("/api/alerts?days=0").status_code == 422
+
+
+def test_full_stall_ranks_as_the_most_severe_deviation():
+    assert anomaly._deviation(0.0) > anomaly._deviation(0.1) > anomaly._deviation(0.2)
+    assert anomaly._deviation(3.0) == pytest.approx(anomaly._deviation(1 / 3))
+
+
+def test_downward_count_correction_is_a_stall_not_a_negative_ratio(engine):
+    seed_normal(engine)
+    # Growing ~100/h, then the platform removes views: the latest interval goes negative.
+    add(engine, "corrected", age_h=30, snaps=[(12, 1200), (18, 1800), (24, 1500)])
+    alerts = [a for a in anomaly.detect(days=7, now=NOW) if a["video"]["video_id"] == "corrected"]
+    for a in alerts:
+        assert a["ratio"] >= 0 and a["observed"] >= 0

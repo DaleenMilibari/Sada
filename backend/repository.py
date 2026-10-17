@@ -139,7 +139,7 @@ def collector_status(run_limit: int = 10) -> dict[str, Any]:
         }
 
 
-def analysis_records(days: int = 60, min_age_days: float = 3.0, platform: str | None = None) -> list[dict[str, Any]]:
+def analysis_records(days: int | None = None, min_age_days: float = 3.0, platform: str | None = None) -> list[dict[str, Any]]:
     """One flat record per post (YouTube video or Instagram post), normalized for fair comparisons.
 
     Shared input for every analysis agent. Confounds removed up front so slices compare like with like:
@@ -156,6 +156,7 @@ def analysis_records(days: int = 60, min_age_days: float = 3.0, platform: str | 
     `engagement_rate` = (likes + comments) / views - YouTube, and X with impressions as views (None without views or both counts).
     Time fields are Riyadh local time.
     """
+    days = config.COLLECTOR_LOOKBACK_DAYS if days is None else days  # default: everything collected
     now = db.utcnow()
     v, c = db.videos.c, db.channels.c
     stmt = (

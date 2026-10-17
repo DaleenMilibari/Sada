@@ -8,12 +8,23 @@ the full spec.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from backend.agents import behavior_analysis_agent, llm_client
 from backend.topics import TOPICS
 
-PLATFORMS = ["x", "youtube", "instagram", "snapchat"]
+logger = logging.getLogger("sada.optimizer")
+
+# Default candidates: the platforms the Data Collector actually measures.
+PLATFORMS = ["youtube", "x", "instagram"]
+
+# Real patterns measured on one platform only apply to drafts for that platform.
+_SOURCE_PLATFORM = {"real_youtube_sba": "youtube", "real_instagram_sba": "instagram", "real_x_sba": "x"}
+
+
+def _applies_to(pattern: dict[str, Any], platform: str) -> bool:
+    return _SOURCE_PLATFORM.get(pattern.get("source", ""), platform) == platform
 
 TIME_WINDOWS = {
     "weekday_morning_6_13": "صباح أيام العمل (6:00-13:00)",
@@ -56,14 +67,24 @@ def _generate_variants_via_llm(
         '["نص 1", "نص 2", "نص 3"]'
     )
     raw_text = llm_client.generate_json(prompt)
+    return _parse_variants(raw_text)
+
+
+def _parse_variants(raw_text: str) -> list[str]:
+    """Up to 4 non-empty text variants from the model's reply, whatever JSON shape it chose."""
     try:
-        variants = json.loads(raw_text)
-        if isinstance(variants, list) and all(isinstance(v, str) for v in variants):
-            return variants[:4]
+        parsed = json.loads(raw_text)
     except json.JSONDecodeError:
-        pass
-    # Fallback parse: one variant per non-empty line.
-    return [line.strip("- ‏‎") for line in raw_text.splitlines() if line.strip()][:4]
+        parsed = None
+    if isinstance(parsed, dict):  # e.g. {"variants": [...]}
+        parsed = next((v for v in parsed.values() if isinstance(v, list)), None)
+    if isinstance(parsed, list):
+        texts = [v if isinstance(v, str) else (v.get("text") if isinstance(v, dict) else None) for v in parsed]
+        variants = [t.strip() for t in texts if isinstance(t, str) and t.strip()]
+    else:  # not JSON: one variant per non-empty line
+        variants = [line.strip("- ‏‎\"[],") for line in raw_text.splitlines()]
+        variants = [v for v in variants if v]
+    return list(dict.fromkeys(variants))[:4]
 
 
 def _text_heuristic_bonus(variant: str) -> tuple[float, str | None]:
@@ -88,6 +109,8 @@ def _matching_patterns(
 ) -> list[dict[str, Any]]:
     matched = []
     for p in patterns:
+        if not _applies_to(p, platform):
+            continue
         if p["dimension"] == "content_type" and p["slice_key"] == content_type:
             matched.append(p)
         elif p["dimension"] == "timing" and p["slice_key"] == time_window:
@@ -137,9 +160,20 @@ def optimize(draft: dict[str, Any], patterns: list[dict[str, Any]]) -> dict[str,
     channel_options: list[str | None] = draft.get("channel_options") or [None]
     time_windows = _real_time_windows(patterns)
 
-    variants = draft.get("variants") or _generate_variants_via_llm(
-        content_type, topic, draft.get("original_text"), draft.get("tone")
-    )
+    variants = [v.strip() for v in draft.get("variants") or [] if v and v.strip()]
+    variants_note = None
+    if not variants:
+        original = (draft.get("original_text") or "").strip()
+        try:
+            variants = _generate_variants_via_llm(content_type, topic, original or None, draft.get("tone"))
+        except Exception:
+            if not original:
+                raise  # nothing to score at all - the API maps this to 503/502
+            logger.exception("Variant generation failed - scoring the original text only")
+            variants = []
+        if not variants and original:
+            variants = [original]
+            variants_note = "تعذّر توليد صيغ بديلة بالذكاء الاصطناعي حالياً، فقُيّم النص الأصلي وحده."
     if not variants:
         raise ValueError("No variants supplied and none could be generated.")
 
@@ -176,7 +210,10 @@ def optimize(draft: dict[str, Any], patterns: list[dict[str, Any]]) -> dict[str,
         # Fallback: no pattern applies to this content type/topic/platform
         # combo at all - fall back to the single highest-confidence pattern
         # we have, explicitly flagged as lower-confidence, per AGENT_SPEC.md.
-        fallback_pattern = max(fallback_candidates, key=lambda p: p["confidence"])
+        # Prefer one measured on the recommended platform, so the evidence
+        # never describes a different platform than the one recommended.
+        same_platform = [p for p in fallback_candidates if _applies_to(p, best["platform"])]
+        fallback_pattern = max(same_platform or fallback_candidates, key=lambda p: p["confidence"])
         best["matched_patterns"] = [fallback_pattern]
 
     def evidence_for(matched: list[dict[str, Any]], note: str | None) -> list[dict[str, Any]]:
@@ -186,6 +223,8 @@ def optimize(draft: dict[str, Any], patterns: list[dict[str, Any]]) -> dict[str,
         ]
         if note:
             ev.append({"pattern_id": "text_heuristic", "pattern": note, "note": "خاصية نصية في المتغير نفسه"})
+        if variants_note:
+            ev.append({"pattern_id": "variants_fallback", "pattern": variants_note, "note": None})
         return ev
 
     ranked_alternatives = [

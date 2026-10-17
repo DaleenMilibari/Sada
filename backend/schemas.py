@@ -8,7 +8,7 @@ tasks stay independent of each other's in-progress code. Do not rename.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -72,10 +72,11 @@ class EngagementRecord(BaseModel):
 
 
 class DraftContent(BaseModel):
-    content_type: str
-    topic: str
-    variants: list[str] | None = None
-    platform_options: list[str] = Field(default_factory=list)
+    # Bounded: the optimizer scores every variant x platform x account x slot.
+    content_type: str = Field(max_length=40)
+    topic: str = Field(max_length=40)
+    variants: list[Annotated[str, Field(max_length=1000)]] | None = Field(default=None, max_length=8)
+    platform_options: list[Annotated[str, Field(max_length=20)]] = Field(default_factory=list, max_length=6)
     # Seed text for LLM variant generation when `variants` is omitted; read by
     # content_optimizer_agent._generate_variants_via_llm via draft.get("original_text").
     original_text: str | None = Field(default=None, max_length=2000)
@@ -85,7 +86,7 @@ class DraftContent(BaseModel):
     # team.md Task 1 "on real data": optional SBA account entity_keys (see
     # backend/sba_channels.py, GET /api/channels) to recommend a specific
     # account from, additive only - when omitted, behavior is unchanged.
-    channel_options: list[str] = Field(default_factory=list)
+    channel_options: list[Annotated[str, Field(max_length=40)]] = Field(default_factory=list, max_length=30)
 
 
 class RankedAlternative(BaseModel):
@@ -380,6 +381,13 @@ class BestTimeCell(BaseModel):
     n: int
 
 
+class BestTimeCoverage(BaseModel):
+    """How much history the best-time cells of one platform rest on."""
+    platform: Literal["youtube", "instagram", "x"]
+    days: int  # from the oldest to the newest post used
+    posts: int
+
+
 class AnalyticsSummary(BaseModel):
     generated_at: datetime
     data_as_of: datetime | None = None  # finish time of the last successful collector run
@@ -392,7 +400,10 @@ class AnalyticsSummary(BaseModel):
     by_channel: list[ChannelStats]
     by_content_type: list[ContentTypeStats]
     by_topic: list[TopicStats]
+    # Computed over everything collected (COLLECTOR_LOOKBACK_DAYS), not just `days`:
+    # a single day/hour cell needs many weeks of posts to be judged.
     best_times: list[BestTimeCell]
+    best_times_coverage: list[BestTimeCoverage] = []
 
 
 # --- Task 4 (team.md): Spikes, drops & root-cause diagnosis ---

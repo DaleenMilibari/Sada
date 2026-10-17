@@ -108,3 +108,16 @@ def test_endpoint_contract_and_latency(engine, monkeypatch):
         client.get("/api/analytics/summary?days=30")
         assert (time.perf_counter() - start) < 0.1  # cached path
         assert client.get("/api/analytics/summary?days=0").status_code == 422
+
+
+def test_best_times_use_all_collected_history_not_the_kpi_window(engine, monkeypatch):
+    monkeypatch.setattr(config, "COLLECTOR_LOOKBACK_DAYS", 180)
+    # One post per week at the same weekday/hour for 20 weeks: only ~4 fall inside a 30-day window.
+    for week in range(20):
+        add(engine, f"w{week}", age_days=7 * week + 7, hour_utc=17)
+
+    s = analytics.build_summary(30, "youtube")
+    assert s["totals"]["posts"] < 5  # the KPIs follow the selected window ...
+    cell = [c for c in s["best_times"] if c["platform"] == "youtube"]
+    assert len(cell) == 1 and cell[0]["n"] == 20  # ... the best times use everything collected
+    assert s["best_times_coverage"] == [{"platform": "youtube", "days": 133, "posts": 20}]

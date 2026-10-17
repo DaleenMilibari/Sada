@@ -237,6 +237,32 @@ def test_export_import_roundtrip(engine, fake, tmp_path):
         assert conn.execute(select(db.videos.c.video_id)).scalars().all() == ["q1"]
 
 
+def test_seed_carries_audience_labels_and_follower_history(engine, fake, tmp_path):
+    from sqlalchemy import func, insert
+
+    from backend import db_tools
+
+    fake.add_video(5, "q1", timedelta(hours=4))
+    _run(engine, fake)
+    now = db.utcnow()
+    with engine.begin() as conn:
+        conn.execute(insert(db.audience_comments), {"comment_id": "c1", "platform": "youtube", "video_id": "q1", "text": "رائع",
+                                                    "published_at": now, "collected_at": now, "sentiment": "positive", "intent": "praise"})
+        conn.execute(insert(db.audience_labels), {"comment_id": "c1", "sentiment": "positive", "intent": "praise", "labeled_at": now})
+    path = tmp_path / "seed.json.gz"
+    exported = db_tools.export(path)
+    assert exported["audience_comments"] == 1 and exported["audience_labels"] == 1 and exported["follower_snapshots"] >= 1
+
+    db.metadata.drop_all(engine)
+    db.init_db(engine)
+    db_tools.import_(path)
+    again = db_tools.import_(path)
+    assert again["follower_snapshots"] == 0 and again["video_snapshots"] == 0  # idempotent
+    with engine.connect() as conn:
+        assert conn.execute(select(db.audience_comments.c.sentiment)).scalar() == "positive"
+        assert conn.execute(select(func.count()).select_from(db.audience_labels)).scalar() == 1
+
+
 def test_analysis_records_normalize_by_channel_and_age(fake):
     from backend import repository
 

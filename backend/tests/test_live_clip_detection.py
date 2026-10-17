@@ -56,3 +56,16 @@ def test_seeded_mock_broadcast_has_expected_spikes():
     assert 1 <= len(result) <= 3
     labels = {o["clip_opportunity"]["segment_label"] for o in result}
     assert "حديث الدعم السكني" in labels or "ختام ولقاء الجمهور" in labels
+
+
+def test_zero_baseline_does_not_crash():
+    signal = [{"timestamp_seconds": i * 10, "engagement_level": 0.0} for i in range(30)]
+    signal[20]["engagement_level"] = 500.0
+    assert agent.detect_clip_opportunities({"signal": signal, "segments": []}) == []
+
+
+def test_out_of_order_signal_gives_the_same_clips():
+    broadcast = agent.load_broadcast()
+    expected = agent.detect_clip_opportunities(broadcast)
+    shuffled = {**broadcast, "signal": list(reversed(broadcast["signal"]))}
+    assert expected and agent.detect_clip_opportunities(shuffled) == expected

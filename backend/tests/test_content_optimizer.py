@@ -130,3 +130,75 @@ def test_optimize_uses_real_timing_windows_when_available():
     assert result["recommended_time"] == opt.TIME_WINDOWS["weekend"]
     for alt in result["ranked_alternatives"]:
         assert alt["time_window"] == opt.TIME_WINDOWS["weekend"]
+
+
+def _real(pattern_id, dimension, slice_key, lift, source):
+    return {
+        "pattern_id": pattern_id, "pattern": pattern_id, "supporting_metric": "n=30", "confidence": 0.9,
+        "affected_content_types": [], "dimension": dimension, "slice_key": slice_key, "lift_pct": lift, "source": source,
+    }
+
+
+def test_platform_specific_patterns_only_score_their_own_platform():
+    # A YouTube timing lift must not boost an X candidate, and an X topic penalty must not hit YouTube.
+    patterns = [
+        _real("yt_weekend", "timing_real", "weekend", 50.0, "real_youtube_sba"),
+        _real("x_news", "topic_real", "news", -40.0, "real_x_sba"),
+    ]
+    draft = {"content_type": "video", "topic": "news", "platform_options": ["x", "youtube"], "variants": ["نص"]}
+    result = opt.optimize(draft, patterns)
+    assert result["recommended_platform"] == "youtube"
+    assert [e["pattern_id"] for e in result["evidence"]] == ["yt_weekend"]
+    for alt in result["ranked_alternatives"]:
+        if alt["platform"] == "x":
+            assert alt["predicted_engagement"] < opt.BASELINE_SCORE
+            assert not any("yt_weekend" in e for e in alt["evidence"])
+
+
+def test_fallback_evidence_comes_from_the_recommended_platform():
+    patterns = [
+        _real("x_live", "content_type_real", "live", 80.0, "real_x_sba"),
+        _real("yt_live", "content_type_real", "live", 20.0, "real_youtube_sba"),
+    ]
+    draft = {"content_type": "image", "topic": "other", "platform_options": ["youtube"], "variants": ["نص"]}
+    result = opt.optimize(draft, patterns)
+    assert result["low_confidence"] is True
+    assert result["evidence"][0]["pattern_id"] == "yt_live"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ('["أ", "ب", "أ"]', ["أ", "ب"]),
+        ('{"variants": ["أ", {"text": "ب"}, 3]}', ["أ", "ب"]),
+        ("- أ\n- ب\n", ["أ", "ب"]),
+        ("[]", []),
+    ],
+)
+def test_variant_parsing_tolerates_the_shapes_models_return(raw, expected):
+    assert opt._parse_variants(raw) == expected
+
+
+def test_llm_failure_scores_the_original_text_instead_of_failing(monkeypatch):
+    def boom(*_args):
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(opt, "_generate_variants_via_llm", boom)
+    draft = {"content_type": "video", "topic": "news", "original_text": "النص الأصلي"}
+    result = opt.optimize(draft, [])
+    assert result["recommended_variant"] == "النص الأصلي"
+    assert any(e["pattern_id"] == "variants_fallback" for e in result["evidence"])
+
+    with pytest.raises(RuntimeError):
+        opt.optimize({"content_type": "video", "topic": "news"}, [])
+
+
+def test_optimize_request_size_is_bounded():
+    from pydantic import ValidationError
+
+    from backend.schemas import DraftContent
+
+    with pytest.raises(ValidationError):
+        DraftContent(content_type="video", topic="news", variants=["نص"] * 9)
+    with pytest.raises(ValidationError):
+        DraftContent(content_type="video", topic="news", channel_options=["c"] * 31)

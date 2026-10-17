@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
+import os
 import statistics
+import threading
 from pathlib import Path
 from typing import Any
 
 from backend.topics import TOPICS
+
+logger = logging.getLogger("sada.behavior")
 
 DATA_PATH = Path(__file__).parent.parent / "data" / "engagement_records.json"
 REAL_DATA_PATH = Path(__file__).parent.parent / "data" / "hajj_1445_platform_totals.json"
@@ -288,7 +293,9 @@ def _finalize(candidates: list[tuple[str, dict[str, Any]]]) -> list[dict[str, An
         if q > FDR_Q or abs(lift) < MIN_LIFT:
             continue
         patterns.append({
-            "pattern_id": _pattern_id(c["dimension"], c["key"]),
+            # The same dimension/slice exists once per platform (e.g. "video" on YouTube and on X):
+            # the source keeps their ids apart so one never overwrites the other.
+            "pattern_id": _pattern_id(c["dimension"], f"{source}:{c['key']}"),
             "pattern": c["describe"](c["key"], c["ratio"]),
             "supporting_metric": (
                 f"المنشور النموذجي هنا: {c['med_a']:.2f}× من المعتاد، مقابل {c['med_b']:.2f}× لبقية المنشورات "
@@ -570,14 +577,23 @@ def analyze_real_awj_sada(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def load_store(store_path: Path = STORE_PATH) -> list[dict[str, Any]]:
-    if not store_path.exists():
+    """The persisted patterns; an unreadable or corrupt store reads as empty instead of failing every caller."""
+    try:
+        patterns = json.loads(store_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
         return []
-    return json.loads(store_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.exception("Pattern store %s is unreadable - treating it as empty", store_path)
+        return []
+    return patterns if isinstance(patterns, list) else []
 
 
 def _write_store(store_path: Path, patterns: list[dict[str, Any]]) -> None:
+    """Write to a temp file and swap it in, so a concurrent reader never sees a half-written store."""
     store_path.parent.mkdir(parents=True, exist_ok=True)
-    store_path.write_text(json.dumps(patterns, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp = store_path.with_name(f"{store_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(json.dumps(patterns, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, store_path)
 
 
 def upsert_store(new_patterns: list[dict[str, Any]], store_path: Path = STORE_PATH) -> list[dict[str, Any]]:

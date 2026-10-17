@@ -27,6 +27,34 @@ MIN_COMPARABLE = 4  # below this, retrieval falls back to a broader match; below
 MIN_COMPARABLE_FLOOR = 2
 
 
+def _parse_llm_reply(raw_text: str) -> dict[str, Any]:
+    """The model's JSON reply, checked: a non-empty "diagnosis" string and a list of recommendation strings.
+
+    Raises ValueError on anything else, so callers fall back to evidence-only wording
+    instead of showing a malformed answer (e.g. a recommendations string split into letters).
+    """
+    parsed = json.loads(raw_text)
+    if not isinstance(parsed, dict):
+        raise ValueError("LLM reply is not a JSON object")
+    diagnosis = parsed.get("diagnosis")
+    recs = parsed.get("recommendations")
+    if isinstance(recs, str):
+        recs = [recs]
+    if not isinstance(diagnosis, str) or not diagnosis.strip() or not isinstance(recs, list):
+        raise ValueError("LLM reply is missing diagnosis/recommendations")
+    parsed["diagnosis"] = diagnosis.strip()
+    parsed["recommendations"] = [str(r).strip() for r in recs if str(r).strip()][:3]
+    return parsed
+
+
+def _evidence_only(factors: list[dict[str, Any]], head: str | None = None) -> tuple[str, list[str]]:
+    """Wording built only from the factors themselves, used when the LLM is unavailable."""
+    reasons = [f["reason"] for f in factors[:3]]
+    text = " ".join([head, *reasons] if head else reasons)
+    recs = [f["recommendation"] for f in factors if f.get("recommendation")]
+    return text, recs or ["راجع العوامل والأدلة المرفقة أدناه قبل نشر محتوى مشابه."]
+
+
 def _load_history(path: Path = HISTORY_PATH) -> list[dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -167,9 +195,10 @@ def _synthesize_via_llm(context: dict[str, Any]) -> tuple[str, list[str], list[i
         '- "factor_order": قائمة بأرقام العوامل (0-based) مرتبة من الأكثر إلى الأقل تأثيراً.\n'
         '- "recommendations": قائمة من 2-3 توصيات عملية قصيرة مبنية على العوامل.\n'
     )
-    raw_text = llm_client.generate_json(prompt)
-    parsed = json.loads(raw_text)
-    return parsed["diagnosis"], parsed["recommendations"], parsed["factor_order"]
+    parsed = _parse_llm_reply(llm_client.generate_json(prompt))
+    order = parsed.get("factor_order")
+    order = [int(i) for i in order if isinstance(i, (int, str)) and str(i).lstrip("-").isdigit()] if isinstance(order, list) else []
+    return parsed["diagnosis"], parsed["recommendations"], order
 
 
 def diagnose(
@@ -187,7 +216,11 @@ def diagnose(
             "low_confidence": True,
         }
 
-    diagnosis_text, recommendations, factor_order = _synthesize_via_llm(context)
+    try:
+        diagnosis_text, recommendations, factor_order = _synthesize_via_llm(context)
+    except Exception:  # no key / model error / malformed reply: evidence-only wording
+        diagnosis_text, recommendations = _evidence_only(context["factors"])
+        factor_order = []
     ordered_factors = [context["factors"][i] for i in factor_order if 0 <= i < len(context["factors"])]
     if not ordered_factors:
         ordered_factors = context["factors"]
@@ -338,8 +371,7 @@ def _synthesize_awj_via_llm(item_label: str, factors: list[dict[str, Any]]) -> t
         '- "diagnosis": فقرة عربية قصيرة (2-4 جمل) تلخص السبب الأرجح، مبنية فقط على العوامل أعلاه.\n'
         '- "recommendations": قائمة من 2-3 توصيات عملية قصيرة مبنية على العوامل.\n'
     )
-    raw_text = llm_client.generate_json(prompt)
-    parsed = json.loads(raw_text)
+    parsed = _parse_llm_reply(llm_client.generate_json(prompt))
     return parsed["diagnosis"], parsed["recommendations"]
 
 
@@ -358,7 +390,10 @@ def diagnose_awj_topic(
             "low_confidence": True,
         }
 
-    diagnosis_text, recommendations = _synthesize_awj_via_llm(context["item_label"], context["factors"])
+    try:
+        diagnosis_text, recommendations = _synthesize_awj_via_llm(context["item_label"], context["factors"])
+    except Exception:  # no key / model error / malformed reply: evidence-only wording
+        diagnosis_text, recommendations = _evidence_only(context["factors"], f"{context['item_label']}:")
     return {
         "diagnosis": diagnosis_text,
         "contributing_factors": context["factors"],
@@ -633,8 +668,8 @@ def _synthesize_video_via_llm(ctx: dict[str, Any]) -> tuple[str, list[str]]:
         f"{factors_desc}\n\n"
         'أعد فقط JSON بالمفاتيح: "diagnosis" (2-3 جمل بالعربية) و"recommendations" (قائمة 1-3 توصيات قصيرة مبنية على العوامل).'
     )
-    parsed = json.loads(llm_client.generate_json(prompt))
-    return parsed["diagnosis"], [str(r) for r in parsed["recommendations"]]
+    parsed = _parse_llm_reply(llm_client.generate_json(prompt))
+    return parsed["diagnosis"], parsed["recommendations"] or _deterministic_synthesis(ctx)[1]
 
 
 def diagnose_video(video_id: str) -> dict[str, Any] | None:

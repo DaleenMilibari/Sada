@@ -24,6 +24,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 API_URL = "https://api.x.com/2"
 MIN_PAGE, MAX_PAGE = 5, 100  # bounds for max_results on the user timeline
+ARCHIVE_MIN_PAGE = 10  # full-archive search returns at least 10 per call
+ARCHIVE_MIN_INTERVAL_S = 1.1
 TWEET_FIELDS = "created_at,public_metrics,entities,attachments,lang"
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 _ID_RE = re.compile(r"^[0-9]{1,25}$")
@@ -60,6 +62,7 @@ class XClient:
         self.calls = 0
         self.posts_read = 0
         self.users_read = 0
+        self._last_archive_call = 0.0
 
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         last_error: Exception | None = None
@@ -131,6 +134,43 @@ class XClient:
         self.posts_read += len(posts)
         return posts, (data.get("meta") or {}).get("next_token")
 
+    def archive_posts(
+        self,
+        username: str,
+        max_results: int,
+        *,
+        start_time: datetime,
+        end_time: datetime,
+        pagination_token: str | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """One page of the account's own posts from full-archive search, newest first, published in [start_time, end_time).
+
+        The user timeline only reaches an account's ~3,200 latest tweets (replies and reposts
+        included), which for a busy news account is under two weeks; the archive goes further back.
+        """
+        if not _USERNAME_RE.match(username):
+            raise XApiError(f"Invalid X username: {username!r}")
+        if pagination_token is not None and not _TOKEN_RE.match(pagination_token):
+            raise XApiError("Invalid paging token")
+        wait = ARCHIVE_MIN_INTERVAL_S - (time.monotonic() - self._last_archive_call)
+        if wait > 0:
+            time.sleep(wait)  # full-archive search allows one request per second
+        params: dict[str, Any] = {
+            "query": f"from:{username} -is:retweet -is:reply",
+            "max_results": max(ARCHIVE_MIN_PAGE, min(MAX_PAGE, max_results)),
+            "start_time": start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end_time": end_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "tweet.fields": TWEET_FIELDS,
+        }
+        if pagination_token is not None:
+            params["next_token"] = pagination_token
+        try:
+            data = self._get("/tweets/search/all", params)
+        finally:
+            self._last_archive_call = time.monotonic()
+        posts = data.get("data") or []
+        self.posts_read += len(posts)
+        return posts, (data.get("meta") or {}).get("next_token")
 
     def replies(self, post_id: str, author_username: str, max_results: int) -> list[dict[str, Any]]:
         """One page of other people's replies to a post (recent search: posts from the last 7 days).

@@ -292,3 +292,30 @@ def test_real_awj_sada_patterns_merge_into_store_alongside_others():
         assert len(merged) == len(synthetic) + len(real_awj)
     finally:
         store_path.unlink(missing_ok=True)
+
+
+def test_same_slice_on_two_platforms_keeps_both_patterns(tmp_path):
+    # "short" over-performs on YouTube and on X alike: two patterns, two ids - neither overwrites the other.
+    records = []
+    for platform in ("youtube", "x"):
+        records += _real_records_for_slice(30, platform=platform, content_type="short", performance_index=2.5)
+        records += _real_records_for_slice(30, platform=platform, content_type="video", performance_index=1.0)
+    found = [p for p in agent.analyze_real_data(records) if p["dimension"] == "content_type_real" and p["slice_key"] == "short"]
+    assert {p["source"] for p in found} == {"real_youtube_sba", "real_x_sba"}
+    assert len({p["pattern_id"] for p in found}) == 2
+
+    stored = agent.run(store_path=tmp_path / "store.json", real_sba_records=records)
+    assert {p["source"] for p in stored if p["dimension"] == "content_type_real" and p["slice_key"] == "short"} == {
+        "real_youtube_sba", "real_x_sba"
+    }
+
+
+def test_corrupt_store_reads_as_empty_and_writes_leave_no_temp_files(tmp_path):
+    store = tmp_path / "patterns" / "store.json"
+    store.parent.mkdir()
+    store.write_text('[{"pattern_id": "half-writ', encoding="utf-8")
+    assert agent.load_store(store) == []
+
+    agent._write_store(store, [{"pattern_id": "p1"}])
+    assert agent.load_store(store) == [{"pattern_id": "p1"}]
+    assert [f.name for f in store.parent.iterdir()] == ["store.json"]

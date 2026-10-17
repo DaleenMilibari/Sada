@@ -51,7 +51,8 @@ def _rolling_baseline(signal: list[dict[str, Any]], index: int) -> tuple[float, 
 
 
 def detect_clip_opportunities(broadcast: dict[str, Any]) -> list[dict[str, Any]]:
-    signal = broadcast["signal"]
+    # A posted signal may arrive out of order; the rolling baseline needs time order.
+    signal = sorted(broadcast["signal"], key=lambda p: p["timestamp_seconds"])
     segments = broadcast["segments"]
 
     flagged_points: list[dict[str, Any]] = []
@@ -60,6 +61,8 @@ def detect_clip_opportunities(broadcast: dict[str, Any]) -> list[dict[str, Any]]
         if baseline is None:
             continue
         mean, stdev = baseline
+        if mean <= 0:
+            continue  # no audience activity to compare with - a "spike" from zero has no meaningful size
         z_score = (point["engagement_level"] - mean) / stdev
         if z_score >= Z_SCORE_THRESHOLD:
             flagged_points.append({**point, "z_score": z_score, "baseline_mean": mean})

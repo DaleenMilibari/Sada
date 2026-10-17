@@ -15,7 +15,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from backend import db, repository
+from backend import config, db, repository
 from backend.topics import TOPICS
 
 CACHE_TTL_SECONDS = 60
@@ -113,11 +113,20 @@ def build_summary(days: int = 30, platform: str | None = None) -> dict[str, Any]
 
     types: dict[tuple[str, str], list[float]] = {}
     topics: dict[str, list[float]] = {}
-    cells: dict[tuple[str, str, int], list[float]] = {}
     for r in records:
         types.setdefault((r["platform"], r["content_type"]), []).append(r["account_index"])  # vs the account's typical post
         topics.setdefault(r["topic"], []).append(r["performance_index"])
+
+    # Best times use the whole collected history: one weekday/hour cell gets a single post a week at best,
+    # so the KPI window (`days`) would leave most cells under MIN_TIMES_N.
+    history = records if days >= config.COLLECTOR_LOOKBACK_DAYS else repository.analysis_records(
+        min_age_days=MIN_POST_AGE_DAYS, platform=platform
+    )
+    cells: dict[tuple[str, str, int], list[float]] = {}
+    spans: dict[str, list[Any]] = {}
+    for r in history:
         cells.setdefault((r["platform"], r["day_of_week"], r["publish_hour"]), []).append(r["performance_index"])
+        spans.setdefault(r["platform"], []).append(r["published_at"])
 
     return {
         "generated_at": db.utcnow(),
@@ -146,6 +155,10 @@ def build_summary(days: int = 30, platform: str | None = None) -> dict[str, Any]
             {"platform": p, "day_of_week": d, "hour": h, "median_performance_index": _median(v), "n": len(v)}
             for (p, d, h), v in sorted(cells.items())
             if len(v) >= MIN_TIMES_N
+        ],
+        "best_times_coverage": [
+            {"platform": p, "days": max(1, round((max(ts) - min(ts)).total_seconds() / 86400)), "posts": len(ts)}
+            for p, ts in sorted(spans.items())
         ],
     }
 
