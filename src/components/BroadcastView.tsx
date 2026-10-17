@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Bot, CheckCircle2, ExternalLink, Loader2, MousePointerClick, ShieldQuestion } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, ExternalLink, History, Loader2, MousePointerClick, ShieldQuestion, Trash2 } from 'lucide-react';
 import { ApiError, apiFetch, describeError } from '../lib/api';
 import AlertsPanel from './AlertsPanel';
 import type { Alert, DiagnosisResult } from '../types';
@@ -14,6 +14,29 @@ interface Message {
   alert?: Alert;
   text?: string;
   result?: DiagnosisResult;
+}
+
+// The conversation survives switching views and reloading (this browser only). Diagnoses
+// themselves are also saved server-side, so a repeat question costs no model call.
+const STORAGE_KEY = 'sada.diagnosis.chat.v1';
+const MAX_MESSAGES = 40;
+
+function loadMessages(): Message[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveMessages(messages: Message[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.slice(-MAX_MESSAGES)));
+  } catch {
+    /* storage unavailable or full - the chat still works for this visit */
+  }
 }
 
 function isLink(ref: string): boolean {
@@ -80,18 +103,29 @@ function DiagnosisBlock({ result }: { result: DiagnosisResult }) {
 
 // "التنبيهات والتشخيص": detected spikes/drops on the left, click one to diagnose it (Task 4).
 export default function BroadcastView({ onNotify }: AlertsViewProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(loadMessages);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    saveMessages(messages);
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
 
   const diagnose = async (alert: Alert) => {
     if (busy) return;
     setSelectedId(alert.alert_id);
+    // Already answered in this conversation: show that answer again instead of asking anew.
+    const asked = messages.findIndex((m) => m.role === 'user' && m.alert?.video.video_id === alert.video.video_id);
+    const answer = asked >= 0 ? messages[asked + 1] : undefined;
+    if (answer?.result) {
+      setHighlightId(answer.id);
+      document.getElementById(`msg-${answer.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => setHighlightId(null), 2000);
+      return;
+    }
     setBusy(true);
     const stamp = Date.now().toString();
     setMessages((prev) => [...prev, { id: stamp, role: 'user', alert }]);
@@ -121,6 +155,17 @@ export default function BroadcastView({ onNotify }: AlertsViewProps) {
             <Bot className="w-4 h-4" />
           </div>
           <h3 className="text-sm font-bold text-slate-900 font-arabic">التشخيص</h3>
+          {messages.length > 0 && (
+            <button
+              onClick={() => setMessages([])}
+              disabled={busy}
+              className="mr-auto flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-600 font-arabic disabled:opacity-40"
+              title="مسح المحادثة من هذا المتصفح (التشخيصات المحفوظة على الخادم تبقى)"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              مسح المحادثة
+            </button>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
@@ -144,8 +189,18 @@ export default function BroadcastView({ onNotify }: AlertsViewProps) {
                 </div>
               </div>
             ) : (
-              <div key={m.id} className="flex justify-end">
-                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 max-w-[95%] w-full">
+              <div key={m.id} id={`msg-${m.id}`} className="flex justify-end">
+                <div
+                  className={`bg-slate-50 border rounded-2xl p-4 max-w-[95%] w-full transition-shadow ${
+                    highlightId === m.id ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-slate-200/80'
+                  }`}
+                >
+                  {m.result?.from_cache && (
+                    <p className="flex items-center gap-1 text-[10px] text-slate-400 font-arabic mb-2">
+                      <History className="w-3 h-3" />
+                      تشخيص محفوظ: لم تتغير أرقام المنشور منذ آخر تحليل
+                    </p>
+                  )}
                   {m.result ? <DiagnosisBlock result={m.result} /> : <p className="text-sm text-slate-700 font-arabic">{m.text}</p>}
                 </div>
               </div>

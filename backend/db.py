@@ -116,6 +116,19 @@ audience_comments = Table(
     Column("classified_at", DateTime(timezone=True)),
 )
 
+# The LLM wording of a post's diagnosis, kept while the evidence behind it is unchanged
+# (diagnostic_recommendation_agent.diagnose_video): re-opening an alert costs no model call.
+diagnoses = Table(
+    "diagnoses",
+    metadata,
+    Column("video_id", String(32), ForeignKey("videos.video_id"), primary_key=True),
+    Column("evidence_hash", String(40), nullable=False),  # sha1 of the factors the wording was built from
+    Column("diagnosis", Text, nullable=False),
+    Column("recommendations", Text, nullable=False),  # JSON list of strings
+    Column("model", String(60)),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
 # Blind human labels for a sample of audience comments - the ground truth that the
 # agent's classification accuracy is measured against (audience_agent.accuracy()).
 audience_labels = Table(

@@ -204,6 +204,8 @@ def test_uses_llm_wording_when_available_and_falls_back_when_not(real_engine, mo
         raise RuntimeError("no key")
 
     monkeypatch.setattr(diag.llm_client, "generate_json", boom)
+    with real_engine.begin() as conn:
+        conn.execute(db.diagnoses.delete())  # no saved wording to reuse
     fallback = diag.diagnose_video("under")
     assert "أقل من المعتاد" in fallback["diagnosis"] and fallback["recommendations"]
 
@@ -242,3 +244,30 @@ def test_awj_diagnosis_falls_back_to_evidence_without_llm(monkeypatch):
     result = diag.diagnose_awj_topic("podcast_reach")
     assert result["low_confidence"] is False
     assert result["diagnosis"] and result["recommendations"] and result["contributing_factors"]
+
+
+def test_same_evidence_reuses_the_saved_wording_without_a_new_llm_call(real_engine, monkeypatch):
+    _seed_peers(real_engine)
+    _add(real_engine, "under", views=2000, hour_utc=0, duration=200, title="خبر عادي")
+    calls = []
+    monkeypatch.setattr(diag.llm_client, "generate_json",
+                        lambda p: calls.append(p) or '{"diagnosis": "تشخيص محفوظ", "recommendations": ["توصية"]}')
+
+    first, second = diag.diagnose_video("under"), diag.diagnose_video("under")
+    assert len(calls) == 1
+    assert first["from_cache"] is False and second["from_cache"] is True
+    assert second["diagnosis"] == first["diagnosis"] and second["recommendations"] == ["توصية"]
+
+    # New numbers for the post -> different evidence -> worded again.
+    with real_engine.begin() as conn:
+        conn.execute(db.videos.update().where(db.videos.c.video_id == "under").values(view_count=900))
+    assert diag.diagnose_video("under")["from_cache"] is False and len(calls) == 2
+
+
+def test_fallback_wording_is_not_cached(real_engine, monkeypatch):
+    _seed_peers(real_engine)
+    _add(real_engine, "under", views=2000, hour_utc=0, duration=200, title="خبر عادي")
+    monkeypatch.setattr(diag.llm_client, "generate_json", lambda p: (_ for _ in ()).throw(RuntimeError("down")))
+    diag.diagnose_video("under")
+    monkeypatch.setattr(diag.llm_client, "generate_json", lambda p: '{"diagnosis": "من النموذج", "recommendations": ["توصية"]}')
+    assert diag.diagnose_video("under")["diagnosis"].startswith("من النموذج")

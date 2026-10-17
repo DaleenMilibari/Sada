@@ -158,6 +158,7 @@ export interface DiagnosisResult {
   contributing_factors: ContributingFactor[];
   recommendations: string[];
   low_confidence: boolean;
+  from_cache?: boolean;
 }
 
 // --- Audience analysis (mirrors backend/schemas.py::AudienceSummary) ---

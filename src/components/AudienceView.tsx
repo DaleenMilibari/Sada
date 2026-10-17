@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ExternalLink, Heart, Loader2, MessageCircle, MessagesSquare, Smile, Target, TrendingUp } from 'lucide-react';
-import { apiFetch, describeError } from '../lib/api';
+import { apiFetch, describeError, ALL_DAYS, daysLabel } from '../lib/api';
 import type { AudienceSummary, AudienceThemes, OptimizerDraft, Platform, SentimentStats } from '../types';
 import { AccuracyPanel, audienceShares, InsightsCard, ThemesCard } from './AudienceInsights';
 
@@ -10,7 +10,7 @@ interface AudienceViewProps {
 }
 
 const REFRESH_MS = 60_000;
-const DAYS_OPTIONS = [7, 30, 60];
+const DAYS_OPTIONS = [7, 30, 90, ALL_DAYS];
 const PLATFORM_TABS: { key: Platform | 'all'; label: string }[] = [
   { key: 'all', label: 'الكل' },
   { key: 'youtube', label: 'يوتيوب' },
@@ -114,7 +114,7 @@ function Card({ title, subtitle, icon, children }: { title: string; subtitle?: s
 
 export default function AudienceView({ onNotify, onCreateDraft }: AudienceViewProps) {
   const [platform, setPlatform] = useState<Platform | 'all'>('all');
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(ALL_DAYS);
   const [summary, setSummary] = useState<AudienceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [themes, setThemes] = useState<AudienceThemes | null>(null);
@@ -171,7 +171,7 @@ export default function AudienceView({ onNotify, onCreateDraft }: AudienceViewPr
         </div>
         <div className="flex gap-2">
           <Segmented options={PLATFORM_TABS} value={platform} onChange={setPlatform} />
-          <Segmented options={DAYS_OPTIONS.map((d) => ({ key: d, label: `${d} يوماً` }))} value={days} onChange={setDays} />
+          <Segmented options={DAYS_OPTIONS.map((d) => ({ key: d, label: daysLabel(d) }))} value={days} onChange={setDays} />
         </div>
       </div>
 

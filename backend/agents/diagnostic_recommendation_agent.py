@@ -412,6 +412,7 @@ def diagnose_awj_topic(
 # Findings are correlations between a post and its peers, not proven causes.
 # ---------------------------------------------------------------------------
 
+import hashlib
 import re
 import statistics
 from datetime import timedelta
@@ -438,6 +439,11 @@ def _primary_value(p: dict[str, Any]) -> int | None:
         return p["view_count"]
     parts = [x for x in (p["like_count"], p["comment_count"]) if x is not None]
     return sum(parts) if parts else None
+
+
+def _clock(hour: int) -> str:
+    """Riyadh clock hour as people read it: 0 -> "12 ص", 13 -> "1 م"."""
+    return f"{hour % 12 or 12} {'ص' if hour % 24 < 12 else 'م'}"
 
 
 def _local_hour(p: dict[str, Any]) -> int:
@@ -541,12 +547,12 @@ def build_video_diagnosis_context(post: dict[str, Any]) -> dict[str, Any]:
         near = sum(min(abs(h - ref_hour), 24 - abs(h - ref_hour)) <= 2 for h in hours) / len(hours)
         if len(group) >= 2 and gap >= 3 and near >= 0.4:  # only when the comparison group actually clusters around one hour
             factors.append({
-                "reason": f"ساعة النشر ({my_hour}:00 بتوقيت الرياض) تختلف عن ساعة نشر المنشورات {word} (حوالي {ref_hour}:00).",
-                "supporting_metric": f"فرق {gap} ساعات؛ {near * 100:.0f}% من {len(group)} منشورات مقارنة نُشرت خلال ±٢ ساعة من {ref_hour}:00",
+                "reason": f"ساعة النشر ({_clock(my_hour)} بتوقيت الرياض) تختلف عن ساعة نشر المنشورات {word} (حوالي {_clock(ref_hour)}).",
+                "supporting_metric": f"فرق {gap} ساعات؛ {near * 100:.0f}% من {len(group)} منشورات مقارنة نُشرت خلال ±٢ ساعة من {_clock(ref_hour)}",
                 "evidence_source_title": anchor["title"],
                 "evidence_url_or_ref": anchor["url"],
                 "confidence": round(base_conf * 0.8, 2),
-                "recommendation": f"جرّب النشر قرب الساعة {ref_hour}:00 بتوقيت الرياض، كما في المنشورات الأعلى أداءً." if fix else None,
+                "recommendation": f"جرّب النشر قرب الساعة {_clock(ref_hour)} بتوقيت الرياض، كما في المنشورات الأعلى أداءً." if fix else None,
             })
 
         my_dur = post.get("duration_seconds")
@@ -686,14 +692,41 @@ def diagnose_video(video_id: str) -> dict[str, Any] | None:
             "recommendations": ["انتظر تراكم المزيد من المنشورات المشابهة قبل التشخيص."],
             "low_confidence": True,
         }
-    try:
-        diagnosis, recs = _synthesize_video_via_llm(ctx)
-    except Exception:  # no key / model error / malformed JSON: fall back to evidence-only wording
-        diagnosis, recs = _deterministic_synthesis(ctx)
+    evidence_hash = _evidence_hash(ctx)
+    cached = _cached_wording(video_id, evidence_hash)
+    if cached:
+        diagnosis, recs = cached
+    else:
+        try:
+            diagnosis, recs = _synthesize_video_via_llm(ctx)
+            _save_wording(video_id, evidence_hash, diagnosis, recs)
+        except Exception:  # no key / model error / malformed JSON: evidence-only wording, not cached
+            diagnosis, recs = _deterministic_synthesis(ctx)
     if ctx["basis"] == "account":
         diagnosis += " (ملاحظة: المقارنة على مستوى الحساب ونوع المحتوى لقلة المنشورات بنفس الموضوع.)"
     factors = [{k: v for k, v in f.items() if k != "recommendation"} for f in ctx["factors"]]
-    return {"diagnosis": diagnosis, "contributing_factors": factors, "recommendations": recs, "low_confidence": False}
+    return {"diagnosis": diagnosis, "contributing_factors": factors, "recommendations": recs,
+            "low_confidence": False, "from_cache": cached is not None}
+
+
+def _evidence_hash(ctx: dict[str, Any]) -> str:
+    """Fingerprint of everything the LLM is shown: same factors and ratio -> same wording, no new call."""
+    material = [round(ctx["ratio"], 2), ctx["basis"], [[f["reason"], f["supporting_metric"]] for f in ctx["factors"]]]
+    return hashlib.sha1(json.dumps(material, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _cached_wording(video_id: str, evidence_hash: str) -> tuple[str, list[str]] | None:
+    d = db.diagnoses.c
+    with db.get_engine().connect() as conn:
+        row = conn.execute(select(d.diagnosis, d.recommendations).where(d.video_id == video_id, d.evidence_hash == evidence_hash)).first()
+    return (row.diagnosis, json.loads(row.recommendations)) if row else None
+
+
+def _save_wording(video_id: str, evidence_hash: str, diagnosis: str, recs: list[str]) -> None:
+    row = {"video_id": video_id, "evidence_hash": evidence_hash, "diagnosis": diagnosis,
+           "recommendations": json.dumps(recs, ensure_ascii=False), "model": llm_client.get_model(), "created_at": db.utcnow()}
+    with db.get_engine().begin() as conn:
+        db.upsert(conn, db.diagnoses, [row], "video_id", [k for k in row if k != "video_id"])
 
 
 if __name__ == "__main__":

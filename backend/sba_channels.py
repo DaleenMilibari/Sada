@@ -31,6 +31,7 @@ BY_ENTITY = {c["entity_key"]: c for c in SBA_CHANNELS}
 # reported in the collector run's error field - it never breaks the run.
 SBA_INSTAGRAM_ACCOUNTS: list[dict[str, str]] = [
     {"entity_key": "saudiya", "username": "saudiyatv"},
+    {"entity_key": "sbc", "username": "sbc_channel"},  # confirmed by the team lead, 2026-10-17
 ]
 
 
@@ -43,12 +44,14 @@ SBA_INSTAGRAM_ACCOUNTS: list[dict[str, str]] = [
 # X_MAX_POSTS_PER_ACCOUNT post reads on its first run, and its entity_key must
 # exist in SBA_CHANNELS. An unknown handle is skipped and reported in the run's error field.
 #
+# SBC_Channel confirmed by the team lead (2026-10-17).
 # Candidates from the team registry, ownership not yet confirmed:
-#   sbc: SBC_Channel, quran_tv: quranchannel, sunnah_tv: sunnahchannel,
+#   quran_tv: quranchannel, sunnah_tv: sunnahchannel,
 #   thikrayat: Thikrayat_tv, quran_radio: QuranRadio_ksa
 SBA_X_ACCOUNTS: list[dict[str, str]] = [
     {"entity_key": "sba", "username": "SBAgovSA"},
     {"entity_key": "saudiya", "username": "saudiatv"},
     {"entity_key": "ekhbariya", "username": "alekhbariyatv"},
     {"entity_key": "riyadiya", "username": "riyadiyatv"},
+    {"entity_key": "sbc", "username": "SBC_Channel"},
 ]

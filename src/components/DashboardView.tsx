@@ -6,7 +6,7 @@ import {
 import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer
 } from 'recharts';
-import { ApiError, apiFetch, describeError } from '../lib/api';
+import { ApiError, apiFetch, describeError, ALL_DAYS, daysLabel } from '../lib/api';
 import type { AnalyticsSummary, Platform } from '../types';
 import TrendingPanel from './TrendingPanel';
 import AccuracyCard from './AccuracyCard';
@@ -116,7 +116,7 @@ const CATEGORY_TABS: {
 ];
 
 const REFRESH_MS = 60_000;
-const DAYS_OPTIONS = [7, 30, 90, 180];
+const DAYS_OPTIONS = [7, 30, 90, ALL_DAYS];
 const PLATFORM_TABS: { key: Platform | 'all'; label: string }[] = [
   { key: 'all', label: 'الكل' },
   { key: 'youtube', label: 'يوتيوب' },
@@ -134,6 +134,14 @@ const DAYS: { key: string; label: string }[] = [
   { key: 'wed', label: 'الأربعاء' }, { key: 'thu', label: 'الخميس' }, { key: 'fri', label: 'الجمعة' }, { key: 'sat', label: 'السبت' },
 ];
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
+// Riyadh clock hour -> "12 ص", "1 ص" ... "12 م", "11 م" (the API's 0-23 read like a count, not a time).
+function hourLabel(h: number): string {
+  const twelve = h % 12 === 0 ? 12 : h % 12;
+  return `${twelve} ${h < 12 ? 'ص' : 'م'}`;
+}
+function hourRange(h: number): string {
+  return `${hourLabel(h)} – ${hourLabel((h + 1) % 24)}`;
+}
 
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 const percent = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 2 });
@@ -254,18 +262,20 @@ function Heatmap({ summary, platform }: { summary: AnalyticsSummary; platform: P
         {top.map((c, i) => (
           <div key={`${c.day_of_week}-${c.hour}`} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-100">
             <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] font-black flex items-center justify-center">{i + 1}</span>
-            <span className="text-xs font-bold text-slate-800 font-arabic">{dayLabel(c.day_of_week)} الساعة {c.hour}:00</span>
+            <span className="text-xs font-bold text-slate-800 font-arabic">{dayLabel(c.day_of_week)} · {hourRange(c.hour)}</span>
             <span className="text-[11px] text-emerald-700 font-arabic">{vsUsual(c.median_performance_index).text} · {c.n} منشوراً</span>
           </div>
         ))}
       </div>
       <div className="overflow-x-auto">
-        <table className="border-separate border-spacing-0.5 w-full min-w-[640px]" dir="ltr">
+        <table className="border-separate border-spacing-0.5 w-full min-w-[860px]" dir="ltr">
           <thead>
             <tr>
-              <th />
+              <th className="text-[9px] font-arabic font-bold text-slate-500 text-right whitespace-nowrap pl-1" dir="rtl">الساعة ←</th>
               {HOURS.map((h) => (
-                <th key={h} className="text-[9px] font-semibold text-slate-400 font-normal">{h}</th>
+                <th key={h} className="text-[9px] font-arabic font-semibold text-slate-500 whitespace-nowrap px-0.5" dir="rtl">
+                  {hourLabel(h)}
+                </th>
               ))}
             </tr>
           </thead>
@@ -280,7 +290,7 @@ function Heatmap({ summary, platform }: { summary: AnalyticsSummary; platform: P
                       key={h}
                       className="h-5 rounded-sm text-center"
                       style={{ backgroundColor: c ? heatColor(c.median_performance_index) : '#f1f5f9' }}
-                      title={c ? `${d.label} الساعة ${h}:00 — ${vsUsual(c.median_performance_index).text} (${c.n} منشوراً)` : 'منشورات قليلة في هذا الوقت - لا يمكن الحكم'}
+                      title={c ? `${d.label} ${hourRange(h)} — ${vsUsual(c.median_performance_index).text} (${c.n} منشوراً)` : `${d.label} ${hourRange(h)}: منشورات قليلة - لا يمكن الحكم`}
                     />
                   );
                 })}
@@ -290,7 +300,7 @@ function Heatmap({ summary, platform }: { summary: AnalyticsSummary; platform: P
         </table>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-[11px] text-slate-500 font-arabic">
-        <span>كل مربع = منشورات نُشرت في ذلك اليوم والساعة · مرّر الفأرة على أي مربع للتفاصيل</span>
+        <span>كل مربع = منشورات نُشرت في ذلك اليوم خلال تلك الساعة (بتوقيت الرياض، ص = صباحاً، م = مساءً) · مرّر الفأرة على أي مربع للتفاصيل</span>
         <span className="flex items-center gap-1.5">
           <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: heatColor(0.4) }} /> أقل من المعتاد
           <span className="w-3 h-3 rounded-sm mr-2" style={{ backgroundColor: heatColor(2) }} /> أعلى من المعتاد
@@ -302,7 +312,7 @@ function Heatmap({ summary, platform }: { summary: AnalyticsSummary; platform: P
 }
 
 export default function DashboardView({ onNotify }: DashboardViewProps) {
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(ALL_DAYS);
   const [platform, setPlatform] = useState<Platform | 'all'>('all');
   const [heatPlatform, setHeatPlatform] = useState<Platform>('youtube');
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
@@ -403,7 +413,7 @@ export default function DashboardView({ onNotify }: DashboardViewProps) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Segmented options={PLATFORM_TABS} value={platform} onChange={setPlatform} />
-          <Segmented options={DAYS_OPTIONS.map((d) => ({ key: d, label: `${d} يوماً` }))} value={days} onChange={setDays} />
+          <Segmented options={DAYS_OPTIONS.map((d) => ({ key: d, label: daysLabel(d) }))} value={days} onChange={setDays} />
         </div>
       </div>
 

@@ -166,6 +166,8 @@ class DiagnosisResult(BaseModel):
     contributing_factors: list[ContributingFactor]
     recommendations: list[str]
     low_confidence: bool = False
+    # True when the wording was reused from an earlier diagnosis of the same evidence (no LLM call).
+    from_cache: bool = False
 
 
 # Diagnoses grounded in the real AWJ | Sada dataset (backend/data/raw/awj_sada_data.json)

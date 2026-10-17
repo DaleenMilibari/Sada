@@ -289,7 +289,7 @@ def get_model_accuracy():
 
 @api.get("/analytics/summary", response_model=AnalyticsSummary)
 def get_analytics_summary(
-    days: int = Query(default=30, ge=1, le=365),
+    days: int = Query(default=30, ge=1, le=3650),
     platform: Literal["youtube", "instagram", "x"] | None = None,
 ):
     return analytics.summary(days, platform)
@@ -317,7 +317,7 @@ def diagnose_video(req: VideoDiagnosisRequest):
 
 @api.get("/audience/summary", response_model=AudienceSummary)
 def get_audience_summary(
-    days: int = Query(default=30, ge=1, le=365),
+    days: int = Query(default=30, ge=1, le=3650),
     platform: Literal["youtube", "instagram", "x"] | None = None,
 ):
     return audience_agent.summary(days, platform)
@@ -325,7 +325,7 @@ def get_audience_summary(
 
 @api.get("/audience/themes", response_model=AudienceThemes, dependencies=[Depends(limit_llm)])
 def get_audience_themes(
-    days: int = Query(default=30, ge=1, le=365),
+    days: int = Query(default=30, ge=1, le=3650),
     platform: Literal["youtube", "instagram", "x"] | None = None,
 ):
     return audience_agent.themes(days, platform)

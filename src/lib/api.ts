@@ -89,3 +89,7 @@ export async function isAuthRequired(): Promise<boolean> {
   const { auth_required } = await apiFetch<{ auth_required: boolean }>('/api/auth/status');
   return auth_required;
 }
+
+// "كل الفترة": a window wider than anything collected, so every stored post/comment is included.
+export const ALL_DAYS = 3650;
+export const daysLabel = (d: number) => (d >= ALL_DAYS ? 'كل الفترة' : `${d} يوماً`);
