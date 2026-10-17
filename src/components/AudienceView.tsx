@@ -3,6 +3,7 @@ import { ExternalLink, Heart, Loader2, MessageCircle, MessagesSquare, Smile, Tar
 import { apiFetch, describeError, ALL_DAYS, daysLabel } from '../lib/api';
 import type { AudienceSummary, AudienceThemes, OptimizerDraft, Platform, SentimentStats } from '../types';
 import { AccuracyPanel, audienceShares, InsightsCard, ThemesCard } from './AudienceInsights';
+import { ContextBar, Segmented, periodLabel } from './ContextBar';
 
 interface AudienceViewProps {
   onNotify?: (title: string, desc?: string, type?: 'success' | 'info') => void;
@@ -14,6 +15,7 @@ const DAYS_OPTIONS = [7, 30, 90, ALL_DAYS];
 const PLATFORM_TABS: { key: Platform | 'all'; label: string }[] = [
   { key: 'all', label: 'الكل' },
   { key: 'youtube', label: 'يوتيوب' },
+  { key: 'instagram', label: 'إنستغرام' },
   { key: 'x', label: 'إكس' },
 ];
 const PLATFORM_LABEL: Record<Platform, string> = { youtube: 'يوتيوب', instagram: 'إنستغرام', x: 'إكس' };
@@ -30,28 +32,6 @@ const INTENT_STYLE: Record<string, string> = {
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 const percent = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 0 });
 const signedPercent = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 0, signDisplay: 'always' });
-
-function Segmented<T extends string | number>({ options, value, onChange }: {
-  options: { key: T; label: string }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
-      {options.map((o) => (
-        <button
-          key={String(o.key)}
-          onClick={() => onChange(o.key)}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold font-arabic transition-colors cursor-pointer ${
-            value === o.key ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function Kpi({ icon, label, value, hint }: { icon: React.ReactNode; label: string; value: string; hint?: string }) {
   return (
@@ -75,24 +55,49 @@ const MIN_DIRECTED = 10;
 function SentimentBar({ s }: { s: SentimentStats }) {
   if (s.directed < MIN_DIRECTED) {
     return (
-      <p className="text-[11px] text-slate-400 font-arabic">
-        ردود قليلة تتحدث عن القناة نفسها ({s.directed} من {s.classified}) - لا يكفي للحكم
-      </p>
+      <p className="text-[10px] text-slate-400 font-arabic">n = {s.directed} رداً عن القناة من {s.classified} · أقل من {MIN_DIRECTED}، لا يكفي للحكم</p>
     );
   }
   const neutral = s.directed - s.positive - s.negative;
-  const part = (n: number) => `${(n / s.directed) * 100}%`;
+  const segments = [
+    { n: s.positive, cls: 'bg-emerald-600 text-white', label: 'إيجابي' },
+    { n: neutral, cls: 'bg-slate-200 text-slate-700', label: 'محايد' },
+    { n: s.negative, cls: 'bg-rose-600 text-white', label: 'سلبي' },
+  ];
   return (
     <div>
-      <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-100">
-        <div className="bg-emerald-500" style={{ width: part(s.positive) }} title={`إيجابي ${s.positive}`} />
-        <div className="bg-slate-300" style={{ width: part(neutral) }} title={`محايد ${neutral}`} />
-        <div className="bg-rose-500" style={{ width: part(s.negative) }} title={`سلبي ${s.negative}`} />
+      <div className="flex h-4 rounded-md overflow-hidden bg-slate-100 gap-px">
+        {segments.filter((g) => g.n > 0).map((g) => (
+          <div
+            key={g.label}
+            className={`${g.cls} text-[9px] font-bold leading-4 text-center overflow-hidden`}
+            style={{ width: `${(g.n / s.directed) * 100}%` }}
+            title={`${g.label}: ${g.n} (${percent.format(g.n / s.directed)})`}
+          >
+            {g.n / s.directed >= 0.12 ? percent.format(g.n / s.directed) : ''}
+          </div>
+        ))}
       </div>
-      <p className="text-[10px] text-slate-500 font-arabic mt-1">
-        إيجابي {percent.format(s.positive / s.directed)} · سلبي {percent.format(s.negative / s.directed)} · من {s.directed} رداً
-        يتحدث عن القناة (و{s.classified - s.directed} رداً تفاعلاً مع الحدث)
-      </p>
+      <p className="text-[10px] text-slate-400 font-arabic mt-1">n = {s.directed} رداً عن القناة من {s.classified}</p>
+    </div>
+  );
+}
+
+function SentimentLegend() {
+  return (
+    <span className="flex items-center gap-2 text-[10px] text-slate-500 font-arabic">
+      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-600" />إيجابي</span>
+      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-slate-200" />محايد</span>
+      <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-rose-600" />سلبي</span>
+    </span>
+  );
+}
+
+function ColumnTitles({ right, left }: { right: string; left: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 font-arabic border-b border-slate-100 pb-1 mb-3">
+      <span>{right}</span>
+      <span>{left}</span>
     </div>
   );
 }
@@ -162,18 +167,16 @@ export default function AudienceView({ onNotify, onCreateDraft }: AudienceViewPr
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-bold text-slate-900 font-arabic">صوت الجمهور</h2>
-          <p className="text-xs text-slate-400 font-arabic">
-            تعليقات وردود الجمهور العامة على منشورات الهيئة، مصنّفة آلياً · تحليل إجمالي دون أي بيانات تعريفية بالأشخاص
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Segmented options={PLATFORM_TABS} value={platform} onChange={setPlatform} />
-          <Segmented options={DAYS_OPTIONS.map((d) => ({ key: d, label: daysLabel(d) }))} value={days} onChange={setDays} />
-        </div>
-      </div>
+      <ContextBar
+        scope={`${platform === 'all' ? 'كل المنصات' : PLATFORM_LABEL[platform]} · ${periodLabel(days)}`}
+        detail={t ? `${t.comments.toLocaleString('en')} تعليقاً ورداً عاماً · تحليل إجمالي بلا بيانات تعريفية بالأشخاص` : 'جارٍ التحميل...'}
+        controls={(
+          <>
+            <Segmented options={PLATFORM_TABS} value={platform} onChange={setPlatform} />
+            <Segmented options={DAYS_OPTIONS.map((d) => ({ key: d, label: daysLabel(d) }))} value={days} onChange={setDays} />
+          </>
+        )}
+      />
 
       {error && !summary && <p className="text-sm text-rose-600 font-arabic">{error}</p>}
       {!summary && !error && (
@@ -194,12 +197,11 @@ export default function AudienceView({ onNotify, onCreateDraft }: AudienceViewPr
         <>
           <InsightsCard summary={summary} themes={themes} />
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             <Kpi
               icon={<MessageCircle className="w-5 h-5" />}
               label="ردود وتعليقات حلّلها الذكاء الاصطناعي"
               value={`${t.classified.toLocaleString('en')} من ${t.comments.toLocaleString('en')}`}
-              hint="بلا أي بيانات تعريفية"
             />
             <Kpi
               icon={<Target className="w-5 h-5" />}
@@ -213,18 +215,13 @@ export default function AudienceView({ onNotify, onCreateDraft }: AudienceViewPr
               value={directed >= 10 ? percent.format(t.positive / directed) : '—'}
               hint={directed >= 10 ? `سلبية: ${percent.format(t.negative / directed)}` : 'عينة صغيرة'}
             />
-            <Kpi
-              icon={<Smile className="w-5 h-5" />}
-              label="صافي الموقف من القنوات (إيجابي − سلبي)"
-              value={directed >= 10 ? signedPercent.format((t.positive - t.negative) / directed) : '—'}
-              hint="من الردود الموجّهة لها"
-            />
           </div>
 
           <ThemesCard themes={themes} loading={themesLoading} onCreateDraft={onCreateDraft} onNotify={onNotify} />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <Card title="الموقف من كل حساب" subtitle="من الردود التي تتحدث عن القناة أو محتواها أو تغطيتها - لا من التفاعل مع الخبر نفسه" icon={<Smile className="w-4 h-4" />}>
+            <Card title="الموقف من كل حساب" subtitle="من الردود التي تتحدث عن القناة أو محتواها، لا عن الخبر نفسه" icon={<Smile className="w-4 h-4" />}>
+              <ColumnTitles right="الحساب · عدد التعليقات" left={<SentimentLegend />} />
               <div className="space-y-4">
                 {summary.by_channel.length === 0 && <p className="text-xs text-slate-400 font-arabic">لا توجد بيانات.</p>}
                 {summary.by_channel.map((c) => (
@@ -239,7 +236,8 @@ export default function AudienceView({ onNotify, onCreateDraft }: AudienceViewPr
               </div>
             </Card>
 
-            <Card title="نمو المتابعين" subtitle="من قياسات دورية لعدد المتابعين" icon={<TrendingUp className="w-4 h-4" />}>
+            <Card title="نمو المتابعين" icon={<TrendingUp className="w-4 h-4" />}>
+              <ColumnTitles right="الحساب" left="المتابعون الآن (التغير خلال الفترة)" />
               <div className="space-y-3">
                 {summary.follower_growth.length === 0 && <p className="text-xs text-slate-400 font-arabic">لا توجد قياسات بعد.</p>}
                 {summary.follower_growth.length > 0 && summary.follower_growth.every((g) => g.change === null) && (
@@ -250,11 +248,13 @@ export default function AudienceView({ onNotify, onCreateDraft }: AudienceViewPr
                 {summary.follower_growth.map((g) => (
                   <div key={`${g.platform}-${g.entity_key}`} className="flex items-center justify-between text-xs">
                     <span className="font-bold text-slate-800 font-arabic">{g.name_ar} ({PLATFORM_LABEL[g.platform]})</span>
-                    <span className="text-slate-600">
-                      {compact.format(g.last)}
-                      {g.change === null ? null : (
-                        <span className={`mr-2 font-bold ${g.change >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {g.change >= 0 ? '+' : ''}{compact.format(g.change)} ({signedPercent.format(g.change_pct ?? 0)})
+                    <span className="flex items-center gap-2 text-slate-600" dir="ltr">
+                      <span className="font-bold text-slate-800">{compact.format(g.last)}</span>
+                      {g.change === null ? (
+                        <span className="text-slate-400">—</span>
+                      ) : (
+                        <span className={`font-bold ${g.change > 0 ? 'text-emerald-600' : g.change < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                          {g.change > 0 ? '+' : ''}{compact.format(g.change)} ({signedPercent.format(g.change_pct ?? 0)})
                         </span>
                       )}
                     </span>
@@ -298,7 +298,8 @@ export default function AudienceView({ onNotify, onCreateDraft }: AudienceViewPr
 
           <AccuracyPanel onNotify={onNotify} />
 
-          <Card title="أكثر المنشورات إثارة للنقاش" subtitle="حسب عدد التعليقات المجمّعة" icon={<MessageCircle className="w-4 h-4" />}>
+          <Card title="أكثر المنشورات إثارة للنقاش" icon={<MessageCircle className="w-4 h-4" />}>
+            <ColumnTitles right="المنشور · عدد التعليقات" left={<SentimentLegend />} />
             <div className="space-y-4">
               {summary.discussed_posts.map((p) => (
                 <div key={p.video.video_id} className="flex flex-col md:flex-row md:items-center gap-3 justify-between">

@@ -95,14 +95,22 @@ const CONTENT_TYPES = [
 // Matches backend/topics.py::TOPICS exactly - the real topic taxonomy the
 // Data Collector agent classifies every SBA post into.
 const TOPICS = [
-  { id: 'news', label: 'أخبار' },
+  { id: 'news', label: 'أخبار محلية' },
+  { id: 'politics', label: 'سياسة وشؤون دولية' },
   { id: 'sports', label: 'رياضة' },
-  { id: 'religious', label: 'ديني' },
+  { id: 'quran_prayer', label: 'قرآن وصلوات' },
+  { id: 'religious', label: 'برامج دينية وفتاوى' },
+  { id: 'hajj_umrah', label: 'حج وعمرة' },
   { id: 'national_event', label: 'مناسبات وطنية' },
-  { id: 'economy', label: 'اقتصاد' },
+  { id: 'economy', label: 'اقتصاد وأعمال' },
+  { id: 'tech', label: 'تقنية وعلوم' },
+  { id: 'health', label: 'صحة وأسلوب حياة' },
+  { id: 'tourism', label: 'سياحة ومناطق' },
+  { id: 'culture', label: 'ثقافة وتراث وفنون' },
+  { id: 'documentary', label: 'وثائقي وتاريخ' },
   { id: 'talk_show', label: 'برامج حوارية' },
-  { id: 'documentary', label: 'وثائقي وثقافة' },
-  { id: 'entertainment', label: 'ترفيه ودراما' },
+  { id: 'drama', label: 'مسلسلات ودراما' },
+  { id: 'entertainment', label: 'ترفيه ومسابقات' },
   { id: 'other', label: 'أخرى' },
 ];
 

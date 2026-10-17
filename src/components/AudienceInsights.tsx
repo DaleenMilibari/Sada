@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ClipboardCheck, Copy, ExternalLink, Lightbulb, Loader2, Sparkles, Target, Wand2 } from 'lucide-react';
 import { apiFetch, describeError } from '../lib/api';
+import { ScopeTag } from './ContextBar';
 import type { AudienceAccuracy, AudienceSummary, AudienceThemes, OptimizerDraft, Platform, ReviewItem } from '../types';
 
 const PLATFORM_LABEL: Record<Platform, string> = { youtube: 'يوتيوب', instagram: 'إنستغرام', x: 'إكس' };
@@ -49,12 +50,6 @@ export function InsightsCard({ summary, themes }: { summary: AudienceSummary; th
   const { classified, directed, count } = audienceShares(summary);
   if (classified < 10) return null;
   const lines: React.ReactNode[] = [];
-  lines.push(
-    <>
-      <strong>{pct((classified - directed) / classified)}</strong> من ردود الجمهور تتفاعل مع الخبر أو الحدث نفسه، و
-      <strong>{pct(directed / classified)}</strong> فقط ({directed} رداً) تتحدث عن القنوات أو محتواها مباشرة.
-    </>,
-  );
   if (directed >= 10) {
     lines.push(
       <>
@@ -72,14 +67,7 @@ export function InsightsCard({ summary, themes }: { summary: AudienceSummary; th
       </>,
     );
   }
-  const top = themes?.themes[0];
-  if (top) {
-    lines.push(
-      <>
-        أكثر ما يتكرر في كلام الجمهور: <strong>«{top.title}»</strong> ({top.count} تعليقاً) — التوصية: {top.recommendation}
-      </>,
-    );
-  }
+  if (lines.length === 0) return null;
   return (
     <div className="rounded-2xl border border-emerald-200 bg-gradient-to-l from-emerald-50 to-white p-6">
       <div className="flex items-center gap-2 mb-3">
@@ -110,7 +98,7 @@ export function ThemesCard({ themes, loading, onCreateDraft, onNotify }: {
   return (
     <Shell
       title="توصيات من صوت الجمهور"
-      subtitle="الذكاء الاصطناعي يجمع الطلبات والانتقادات المتكررة في مواضيع ويقترح إجراءً لكل منها · كل موضوع مبني على تعليقين حقيقيين على الأقل"
+      subtitle="طلبات وانتقادات متكررة مع إجراء مقترح لكل منها · كل موضوع مبني على تعليقين حقيقيين على الأقل"
       icon={<Target className="w-4 h-4" />}
     >
       {loading && (
@@ -305,10 +293,15 @@ export function AccuracyPanel({ onNotify }: { onNotify?: (title: string, desc?: 
       title="دقة تحليل الجمهور"
       subtitle="مقارنة تصنيف الذكاء الاصطناعي بمراجعة بشرية عمياء: المراجع لا يرى تصنيف النموذج قبل أن يصنّف"
       icon={<ClipboardCheck className="w-4 h-4" />}
-      action={!reviewing && (
-        <button onClick={() => setReviewing(true)} className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold font-arabic cursor-pointer">
-          راجع تعليقات
-        </button>
+      action={(
+        <div className="flex items-center gap-2">
+          <ScopeTag fixed>كل التعليقات المراجَعة</ScopeTag>
+          {!reviewing && (
+            <button onClick={() => setReviewing(true)} className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold font-arabic cursor-pointer">
+              راجع تعليقات
+            </button>
+          )}
+        </div>
       )}
     >
       {!acc && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}

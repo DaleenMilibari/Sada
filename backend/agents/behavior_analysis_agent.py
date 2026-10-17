@@ -14,6 +14,7 @@ import math
 import os
 import statistics
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -247,15 +248,22 @@ def _bh_adjust(p_values: list[float]) -> list[float]:
     return adjusted
 
 
-def _ratio_phrase(ratio: float) -> str:
-    if ratio >= 1.95:
-        return f"{ratio:.1f} أضعاف المعتاد" if ratio < 10 else f"{ratio:.0f} ضعفاً من المعتاد"
+# What each platform's performance_index measures, as the noun a reader sees in a sentence.
+METRIC_NOUN_AR = {"youtube": "مشاهدات", "x": "مرات ظهور", "instagram": "إعجابات وتعليقات"}
+METRIC_TITLE_AR = {"youtube": "المشاهدات", "x": "مرات الظهور", "instagram": "الإعجابات والتعليقات"}
+
+
+def _ratio_phrase(ratio: float, noun: str = "أداءً") -> str:
+    """'مشاهدات أكثر بـ 53%' / 'مرات ظهور أقل بـ 26%' / 'أداءً أعلى بـ 102% (أي 2.0×)' - no statistics vocabulary."""
     pct = abs(ratio - 1) * 100
-    return f"أداءً أعلى بـ {pct:.0f}%" if ratio > 1 else f"أداءً أقل بـ {pct:.0f}%"
+    more, less = ("أعلى", "أقل") if noun == "أداءً" else ("أكثر", "أقل")
+    phrase = f"{noun} {more if ratio > 1 else less} بـ {pct:.0f}%"
+    return f"{phrase} (أي {ratio:.1f}×)" if ratio >= 1.95 else phrase
 
 
-def _real_candidates(records, dimension, key_fn, index_key, describe_fn) -> list[dict[str, Any]]:
-    """Every slice with enough posts on both sides, with its effect and raw p-value (not yet filtered)."""
+def _real_candidates(records, dimension, key_fn, index_key, describe_fn, label_fn) -> list[dict[str, Any]]:
+    """`label_fn(key)` -> (short title, platform or None, metric title) - what the dashboard shows as the card heading."""
+    # Every slice with enough posts on both sides, with its effect and raw p-value (not yet filtered).
     buckets: dict[str, list[dict[str, Any]]] = {}
     for r in records:
         buckets.setdefault(key_fn(r), []).append(r)
@@ -277,7 +285,7 @@ def _real_candidates(records, dimension, key_fn, index_key, describe_fn) -> list
         out.append({
             "dimension": dimension, "key": key, "n": len(bucket), "n_rest": len(rest), "t": t_stat,
             "p": _p_value(t_stat, a, b) if t_stat else 1.0, "ratio": med_a / med_b, "med_a": med_a, "med_b": med_b,
-            "types": sorted({r["content_type"] for r in bucket}), "describe": describe_fn,
+            "types": sorted({r["content_type"] for r in bucket}), "describe": describe_fn, "label": label_fn(key),
         })
     return out
 
@@ -298,9 +306,9 @@ def _finalize(candidates: list[tuple[str, dict[str, Any]]]) -> list[dict[str, An
             "pattern_id": _pattern_id(c["dimension"], f"{source}:{c['key']}"),
             "pattern": c["describe"](c["key"], c["ratio"]),
             "supporting_metric": (
-                f"المنشور النموذجي هنا: {c['med_a']:.2f}× من المعتاد، مقابل {c['med_b']:.2f}× لبقية المنشورات "
-                f"(n={c['n']} مقابل {c['n_rest']}؛ Welch t={c['t']:.1f} على المقياس اللوغاريتمي؛ "
-                f"q={q:.2g} بعد تصحيح المقارنات المتعددة)"
+                f"المنشور المعتاد هنا يحقق {c['med_a']:.2f}× من المعتاد لحسابه، مقابل {c['med_b']:.2f}× لبقية المنشورات · "
+                f"مبني على {c['n']} منشوراً مقابل {c['n_rest']} · احتمال أن يكون الفرق صدفة q={q:.2g} "
+                f"(بعد تصحيح المقارنات المتعددة؛ Welch t={c['t']:.1f} على المقياس اللوغاريتمي)"
             ),
             "confidence": round(min(0.99, 1 - q), 2),
             "affected_content_types": c["types"],
@@ -311,6 +319,10 @@ def _finalize(candidates: list[tuple[str, dict[str, Any]]]) -> list[dict[str, An
             "q_value": round(q, 6),
             "typical_ratio": round(c["ratio"], 3),
             "source": source,
+            "title": c["label"][0],
+            "platform": c["label"][1],
+            "metric_ar": c["label"][2],
+            "n_rest": c["n_rest"],
         })
     return patterns
 
@@ -336,26 +348,45 @@ def analyze_real_data(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not rows:
             continue
         on = f"على {PLATFORM_LABELS_AR.get(platform, platform)}"
+        noun, metric = METRIC_NOUN_AR[platform], METRIC_TITLE_AR[platform]
         names = {r["entity_key"]: r["channel_name_ar"] for r in rows}
         source = f"real_{platform}_sba"
+
+        def channel_topic(k: str, names=names) -> tuple[str, str]:
+            entity, topic = k.split("|")
+            return names.get(entity, entity), TOPICS.get(topic, topic)
+
         found = _real_candidates(
             rows, "content_type_real", lambda r: r["content_type"], "account_index",
-            lambda k, ratio, on=on: f"{CONTENT_TYPE_AR.get(k, k)} {on}: المنشور النموذجي يحقق {_ratio_phrase(ratio)} مقارنة ببقية أنواع المحتوى في نفس الحسابات.",
+            lambda k, ratio, on=on, noun=noun: (
+                f"منشورات {CONTENT_TYPE_AR.get(k, k)} {on} تحصل عادةً على {_ratio_phrase(ratio, noun)} "
+                f"من بقية أنواع المحتوى في نفس الحسابات."
+            ),
+            lambda k, platform=platform, metric=metric: (CONTENT_TYPE_AR.get(k, k), platform, metric),
         )
         found += _real_candidates(
             rows, "timing_real", lambda r: hour_bucket(r["day_of_week"], r["publish_hour"]), "performance_index",
-            lambda k, ratio, on=on: f"النشر في {TIMING_AR.get(k, k)} {on}: المنشور النموذجي يحقق {_ratio_phrase(ratio)} مقارنة ببقية الأوقات.",
+            lambda k, ratio, on=on, noun=noun: (
+                f"المنشورات في {TIMING_AR.get(k, k)} {on} تحصل عادةً على {_ratio_phrase(ratio, noun)} "
+                f"من المنشورات في بقية الأوقات (مقارنةً بالمعتاد لكل حساب)."
+            ),
+            lambda k, platform=platform, metric=metric: (TIMING_AR.get(k, k), platform, metric),
         )
         found += _real_candidates(
             rows, "topic_real", lambda r: r["topic"], "performance_index",
-            lambda k, ratio, on=on: f"موضوع «{TOPICS.get(k, k)}» {on}: المنشور النموذجي يحقق {_ratio_phrase(ratio)} مقارنة ببقية الموضوعات.",
+            lambda k, ratio, on=on, noun=noun: (
+                f"منشورات «{TOPICS.get(k, k)}» {on} تحصل عادةً على {_ratio_phrase(ratio, noun)} "
+                f"من منشورات بقية المواضيع (مقارنةً بالمعتاد لكل حساب)."
+            ),
+            lambda k, platform=platform, metric=metric: (f"«{TOPICS.get(k, k)}»", platform, metric),
         )
         found += _real_candidates(
             rows, "channel_topic_real", lambda r: f"{r['entity_key']}|{r['topic']}", "performance_index",
-            lambda k, ratio, on=on, names=names: (
-                f"{names.get(k.split('|')[0], k.split('|')[0])} {on}، موضوع «{TOPICS.get(k.split('|')[1], k.split('|')[1])}»: "
-                f"المنشور النموذجي يحقق {_ratio_phrase(ratio)} مقارنة ببقية محتوى الحساب."
+            lambda k, ratio, on=on, noun=noun, ct=channel_topic: (
+                f"منشورات {ct(k)[0]} {on} عن «{ct(k)[1]}» تحصل عادةً على {_ratio_phrase(ratio, noun)} "
+                f"من المنشور المعتاد للحساب نفسه."
             ),
+            lambda k, platform=platform, metric=metric, ct=channel_topic: (f"{ct(k)[0]} · {ct(k)[1]}", platform, metric),
         )
         candidates += [(source, c) for c in found]
 
@@ -363,9 +394,10 @@ def analyze_real_data(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         cross = _real_candidates(
             records, "platform_content_real", lambda r: f"{r['platform']}|{r['content_type']}", "account_index",
             lambda k, ratio: (
-                f"{CONTENT_TYPE_AR.get(k.split('|')[1], k.split('|')[1])} على {PLATFORM_LABELS_AR.get(k.split('|')[0], k.split('|')[0])}: "
-                f"المنشور النموذجي يحقق {_ratio_phrase(ratio)} مقارنة ببقية المحتوى عبر كل المنصات."
+                f"منشورات {CONTENT_TYPE_AR.get(k.split('|')[1], k.split('|')[1])} على {PLATFORM_LABELS_AR.get(k.split('|')[0], k.split('|')[0])} "
+                f"تحقق عادةً {_ratio_phrase(ratio)} من بقية المحتوى على كل المنصات (مقارنةً بالمعتاد لكل حساب)."
             ),
+            lambda k: (CONTENT_TYPE_AR.get(k.split("|")[1], k.split("|")[1]), k.split("|")[0], "الأداء مقارنةً بالمعتاد للحساب"),
         )
         candidates += [("real_sba", c) for c in cross]
 
@@ -379,13 +411,18 @@ def _load_real_hajj_totals(path: Path = REAL_DATA_PATH) -> dict[str, Any] | None
 
 
 METRIC_LABELS_AR = {"impressions": "مرات الظهور", "views": "المشاهدات"}
+# Platform names in this source (meta/tiktok aren't collected per post, so they aren't in PLATFORM_LABELS_AR).
+HAJJ_PLATFORM_AR = {"youtube": "يوتيوب", "x": "إكس", "meta": "ميتا (فيسبوك وإنستغرام)", "tiktok": "تيك توك"}
 RATE_LABELS_AR = {
     ("engagement", "views"): "التفاعل لكل مشاهدة",
     ("engagement", "impressions"): "التفاعل لكل ظهور",
 }
 
 
-def _real_pattern(slice_key: str, text: str, metric_line: str, lift: float, n_reporting: int) -> dict[str, Any]:
+def _real_pattern(
+    slice_key: str, text: str, metric_line: str, lift: float, n_reporting: int, title: str, platform: str,
+    share_pct: float | None = None,
+) -> dict[str, Any]:
     confidence = round(min(0.85, 0.5 + min(abs(lift), 2.0) / 4 + max(n_reporting - REAL_MIN_PLATFORMS, 0) * 0.05), 2)
     return {
         "pattern_id": _pattern_id("platform_reach_real", slice_key),
@@ -397,6 +434,9 @@ def _real_pattern(slice_key: str, text: str, metric_line: str, lift: float, n_re
         "slice_key": slice_key,
         "lift_pct": round(lift * 100, 1),
         "source": "real_hajj_1445_sba",
+        "title": title,
+        "platform": platform,
+        "share_pct": share_pct,
     }
 
 
@@ -421,16 +461,19 @@ def _share_patterns(platforms: dict[str, dict[str, Any]], metric: str, label_ar:
         lift = (share - baseline_share) / baseline_share
         if abs(lift) < REAL_MIN_LIFT:
             continue
-        direction = "أعلى" if lift > 0 else "أقل"
+        name = HAJJ_PLATFORM_AR.get(platform, platform)
         text = (
-            f"منصة {platform} حصتها من {label_ar} خلال موسم حج 1445هـ {direction} من حصة متساوية متوقعة "
-            f"بين المنصات المُبلغة ({share * 100:.1f}% مقابل {baseline_share * 100:.1f}%)."
+            f"خلال موسم حج 1445هـ جاءت {share * 100:.{0 if share >= 0.1 else 1}f}% من {label_ar} عبر {name}، "
+            f"من بين {len(reporting)} منصات (لو توزعت بالتساوي لكان نصيب كل منصة {baseline_share * 100:.0f}%)."
         )
         metric_line = (
-            f"{platform}={value:,.0f} من إجمالي {total:,.0f} مُبلَّغ بين {len(reporting)} منصات ({reported_list}); "
-            f"حصة={share * 100:.1f}%, lift={lift * 100:.1f}%"
+            f"{name}: {value:,.0f} من إجمالي {total:,.0f} بين {len(reporting)} منصات "
+            f"({'، '.join(HAJJ_PLATFORM_AR.get(p, p) for p in sorted(reporting))}) · الحصة {share * 100:.1f}%"
         )
-        out.append(_real_pattern(f"{metric}:{platform}", text, metric_line, lift, len(reporting)))
+        out.append(_real_pattern(
+            f"{metric}:{platform}", text, metric_line, lift, len(reporting),
+            title=f"{name} · حصة {label_ar}", platform=platform, share_pct=round(share * 100, 1),
+        ))
     return out
 
 
@@ -457,16 +500,20 @@ def _rate_patterns(platforms: dict[str, dict[str, Any]], numerator: str, denomin
         lift = (rate - others_mean) / others_mean
         if abs(lift) < REAL_MIN_LIFT:
             continue
-        direction = "أعلى" if lift > 0 else "أقل"
+        name = HAJJ_PLATFORM_AR.get(platform, platform)
         text = (
-            f"منصة {platform} يحقق معدل {label_ar} {direction} بنسبة {abs(lift) * 100:.0f}% عن بقية "
-            f"المنصات القابلة للمقارنة خلال موسم حج 1445هـ."
+            f"خلال موسم حج 1445هـ كان معدل {label_ar} على {name} {rate * 100:.2f}%، "
+            f"مقابل {others_mean * 100:.2f}% في المتوسط على المنصات الأخرى"
+            + (f"، أي {1 + lift:.1f}× ما تحققه." if lift >= 0.95 else f"، أي {'أعلى' if lift > 0 else 'أقل'} بـ {abs(lift) * 100:.0f}%.")
         )
         metric_line = (
-            f"{platform}: {numerator}/{denominator}={rate * 100:.2f}% مقابل متوسط بقية المنصات "
-            f"{others_mean * 100:.2f}% (lift={lift * 100:.1f}%)"
+            f"{name}: {label_ar} = {rate * 100:.2f}% مقابل متوسط بقية المنصات {others_mean * 100:.2f}% "
+            f"(الفرق {lift * 100:+.0f}%) · مقارنة بين {len(rates)} منصات تُبلغ عن الرقمين"
         )
-        out.append(_real_pattern(f"{numerator}_per_{denominator}:{platform}", text, metric_line, lift, len(rates)))
+        out.append(_real_pattern(
+            f"{numerator}_per_{denominator}:{platform}", text, metric_line, lift, len(rates),
+            title=f"{name} · معدل {label_ar}", platform=platform,
+        ))
     return out
 
 
@@ -496,7 +543,7 @@ def _load_real_awj_sada(path: Path = AWJ_REAL_DATA_PATH) -> dict[str, Any] | Non
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _awj_pattern(slice_key: str, text: str, metric_line: str, lift: float, n_samples: int) -> dict[str, Any]:
+def _awj_pattern(slice_key: str, text: str, metric_line: str, lift: float, n_samples: int, title: str, platform: str) -> dict[str, Any]:
     # Confidence capped well below the synthetic pipeline's ceiling - these
     # are descriptive comparisons over a handful of real records, not
     # t-tested results.
@@ -511,6 +558,9 @@ def _awj_pattern(slice_key: str, text: str, metric_line: str, lift: float, n_sam
         "slice_key": slice_key,
         "lift_pct": round(lift * 100, 1),
         "source": "real_awj_sada",
+        "sample_size": n_samples,
+        "title": title,
+        "platform": platform,
     }
 
 
@@ -541,16 +591,17 @@ def analyze_real_awj_sada(data: dict[str, Any]) -> list[dict[str, Any]]:
             if abs(lift) < REAL_AWJ_MIN_LIFT:
                 continue
             n = podcasts[name]["youtube_views_reported"]
-            direction = "أعلى" if lift > 0 else "أقل"
             text = (
-                f"حلقات بودكاست {name} تحقق متوسط مشاهدات يوتيوب {direction} بنسبة "
-                f"{abs(lift) * 100:.0f}% عن متوسط البودكاستات المرصودة."
+                f"حلقات بودكاست {name} تحصل في المتوسط على {_ratio_phrase(1 + lift, 'مشاهدات')} على يوتيوب "
+                f"من متوسط بودكاستات أوج | صدى المرصودة."
             )
             metric_line = (
                 f"{name}: متوسط مشاهدات={avg_views:,.0f} (n={n}) مقابل المتوسط العام "
                 f"{overall:,.0f}؛ lift={lift * 100:.1f}%"
             )
-            patterns.append(_awj_pattern(f"podcast_youtube_views:{name}", text, metric_line, lift, n))
+            patterns.append(_awj_pattern(
+                f"podcast_youtube_views:{name}", text, metric_line, lift, n, title=f"بودكاست {name}", platform="youtube",
+            ))
 
     by_rel = data.get("x_by_relationship", {})
     official = by_rel.get("official account")
@@ -558,10 +609,9 @@ def analyze_real_awj_sada(data: dict[str, Any]) -> list[dict[str, Any]]:
     if official and amplification and official.get("avg_views") and amplification.get("avg_views"):
         lift = (official["avg_views"] - amplification["avg_views"]) / amplification["avg_views"]
         if abs(lift) >= REAL_AWJ_MIN_LIFT:
-            direction = "أعلى" if lift > 0 else "أقل"
             text = (
-                f"منشورات الحساب الرسمي @Medhalpodcast على X تحقق مشاهدات {direction} بنسبة "
-                f"{abs(lift) * 100:.0f}% مقارنةً بمنشورات إعادة النشر من حسابات أخرى."
+                f"منشورات الحساب الرسمي @Medhalpodcast على إكس تحصل في المتوسط على {_ratio_phrase(1 + lift, 'مشاهدات')} "
+                f"من منشورات الحسابات الأخرى التي تعيد نشر البودكاست."
             )
             metric_line = (
                 f"رسمي: متوسط مشاهدات={official['avg_views']:,.0f} (n={official['post_count']}) مقابل "
@@ -570,7 +620,10 @@ def analyze_real_awj_sada(data: dict[str, Any]) -> list[dict[str, Any]]:
             )
             n_total = official["post_count"] + amplification["post_count"]
             patterns.append(
-                _awj_pattern("x_relationship_views:official_vs_amplification", text, metric_line, lift, n_total)
+                _awj_pattern(
+                    "x_relationship_views:official_vs_amplification", text, metric_line, lift, n_total,
+                    title="الحساب الرسمي مقابل إعادة النشر", platform="x",
+                )
             )
 
     return patterns
@@ -651,6 +704,9 @@ def run(
         patterns += analyze_real_awj_sada(awj_real)
 
     unique = list({p["pattern_id"]: p for p in patterns}.values())
+    computed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for p in unique:
+        p["computed_at"] = computed_at  # lets the dashboard say how fresh the store is
     _write_store(store_path, unique)
     return unique
 

@@ -50,6 +50,16 @@ class Pattern(BaseModel):
     sample_size: int | None = None
     q_value: float | None = None
     typical_ratio: float | None = None
+    # Display fields for the dashboard, so it never has to parse the Arabic sentence:
+    # a short heading ("قناة السعودية · وثائقي وثقافة"), the platform it is about, what was
+    # measured ("مرات الظهور"), how many posts it was compared against, and - Hajj platform
+    # share patterns only - the platform's share of the season total in percent.
+    title: str | None = None
+    platform: str | None = None
+    metric_ar: str | None = None
+    n_rest: int | None = None
+    share_pct: float | None = None
+    computed_at: str | None = None  # ISO-8601 UTC time of the run that produced this pattern
 
 
 class EngagementRecord(BaseModel):

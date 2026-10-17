@@ -16,11 +16,24 @@ interface AlertsPanelProps {
 
 const PLATFORM_LABEL = { youtube: 'يوتيوب', instagram: 'إنستغرام', x: 'إكس' } as const;
 
+// The sports channels (backend/sba_channels.py "riyadiya") are run by their own team, so their alerts are
+// split from the rest of SBA's accounts.
+const SPORTS_ENTITIES = new Set(['riyadiya']);
+type AccountGroup = 'all' | 'sba' | 'sports';
+const GROUPS: { key: AccountGroup; label: string }[] = [
+  { key: 'all', label: 'كل الحسابات' },
+  { key: 'sba', label: 'حسابات الهيئة' },
+  { key: 'sports', label: 'الحسابات الرياضية' },
+];
+const inGroup = (a: Alert, g: AccountGroup) =>
+  g === 'all' || (g === 'sports') === SPORTS_ENTITIES.has(a.video.entity_key);
+
 // Spikes (green) and drops (red) detected on real SBA posts (Task 4). Fetches its own data.
 export default function AlertsPanel({ compact: isCompact = false, days = isCompact ? 7 : 30, selectedId, onSelect }: AlertsPanelProps) {
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [group, setGroup] = useState<AccountGroup>('all');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,7 +54,8 @@ export default function AlertsPanel({ compact: isCompact = false, days = isCompa
     return () => window.clearInterval(id);
   }, [load]);
 
-  const shown = alerts ? (isCompact ? alerts.slice(0, 5) : alerts) : null;
+  const inScope = alerts?.filter((a) => inGroup(a, group)) ?? null;
+  const shown = inScope ? (isCompact ? inScope.slice(0, 5) : inScope) : null;
 
   return (
     <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs">
@@ -54,7 +68,7 @@ export default function AlertsPanel({ compact: isCompact = false, days = isCompa
             <h3 className="text-sm font-bold text-slate-900 font-arabic">قفزات وانخفاضات الأداء</h3>
             <p className="text-[11px] text-slate-500 font-arabic">
               مقارنة بالمعتاد لنفس الحساب ونوع المحتوى · آخر {days} يوماً
-              {alerts && !isCompact ? ` · ${alerts.length} تنبيه` : ''}
+              {inScope && !isCompact ? ` · ${inScope.length} تنبيه` : ''}
             </p>
           </div>
         </div>
@@ -68,6 +82,24 @@ export default function AlertsPanel({ compact: isCompact = false, days = isCompa
         </button>
       </div>
 
+      {!isCompact && (
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl mb-4 w-fit" role="group" aria-label="الحسابات">
+          {GROUPS.map((g) => {
+            const count = alerts?.filter((a) => inGroup(a, g.key)).length;
+            return (
+              <button
+                key={g.key}
+                onClick={() => setGroup(g.key)}
+                aria-pressed={group === g.key}
+                className={`px-3 py-1 rounded-lg text-xs font-bold font-arabic transition-all cursor-pointer ${group === g.key ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                {g.label}{count != null && <span className="text-slate-400 font-normal"> {count}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {shown === null && !error && (
         <div className="space-y-2">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -80,7 +112,9 @@ export default function AlertsPanel({ compact: isCompact = false, days = isCompa
 
       {shown !== null && shown.length === 0 && (
         <p className="text-sm text-slate-500 font-arabic text-center py-8">
-          لا توجد قفزات أو انخفاضات تتجاوز الحد خلال هذه الفترة (أو أن عدد المنشورات المشابهة غير كافٍ للحكم).
+          {group === 'all'
+            ? 'لا توجد قفزات أو انخفاضات تتجاوز الحد خلال هذه الفترة (أو أن عدد المنشورات المشابهة غير كافٍ للحكم).'
+            : `لا توجد قفزات أو انخفاضات في ${group === 'sports' ? 'الحسابات الرياضية' : 'حسابات الهيئة'} خلال هذه الفترة.`}
         </p>
       )}
 

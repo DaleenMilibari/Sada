@@ -19,7 +19,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException,
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from backend import analytics, auth, config, db, draft_suggest, playbook, repository
+from backend import analytics, auth, config, db, draft_suggest, playbook, repository, topics
 from backend.agents import (
     audience_agent,
     behavior_analysis_agent,
@@ -82,9 +82,12 @@ async def _collector_loop() -> None:
 async def lifespan(_app: FastAPI):
     config.validate()
     db.init_db()
-    if not behavior_analysis_agent.load_store():
+    topics.migrate_taxonomy()  # no-op once the stored posts use the current taxonomy
+    store = behavior_analysis_agent.load_store()
+    # Rebuild when empty, or when written before patterns carried their dashboard fields.
+    if not store or any("title" not in p or "computed_at" not in p for p in store):
         patterns = behavior_analysis_agent.run()
-        logger.info("Pattern store was empty - built %d pattern(s) on startup.", len(patterns))
+        logger.info("Pattern store was empty or outdated - built %d pattern(s) on startup.", len(patterns))
     collector_task = None
     if config.COLLECTOR_SCHEDULE_ENABLED and _collector_configured():
         collector_task = asyncio.create_task(_collector_loop())

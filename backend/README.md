@@ -11,7 +11,7 @@ python -m backend.db_tools import backend/data/sba_youtube_seed.json.gz   # real
 uvicorn backend.api:app --reload --port 8000
 ```
 
-`GEMINI_API_KEY` is used for optimizer variants, diagnosis narratives, topic refinement and comment classification. Without it:
+`OPENAI_API_KEY` (preferred, with Gemini as fallback) or `GEMINI_API_KEY` is used for optimizer variants, diagnosis narratives, topic refinement and comment classification. Without it:
 - the optimizer still works if you pass `variants` in the draft
 - the video diagnosis falls back to evidence-only wording
 - topics stay rule-based and comments stay unclassified

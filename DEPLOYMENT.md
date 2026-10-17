@@ -251,6 +251,7 @@ See [backend/.env.example](backend/.env.example) for all variables. Key ones:
 | `SADA_LLM_RATE_LIMIT_PER_MINUTE` | `20` | Per-IP limit on Gemini-backed routes |
 | `SADA_LOGIN_RATE_LIMIT_PER_MINUTE` | `5` | Per-IP limit on login attempts |
 | `SADA_TRUSTED_PROXY_HOPS` | `0` (`1` on Render) | Proxies in front of the app, for real client IP |
+| `OPENAI_MODEL` | `gpt-5-mini` (then `OPENAI_FALLBACK_MODEL`, default none) | Used first whenever `OPENAI_API_KEY` is set; Gemini becomes the fallback |
 | `GEMINI_MODEL` | `gemini-3.8-flash` (falls back to `GEMINI_FALLBACK_MODEL`, default `gemini-3.5-flash,gemini-3.5-flash-lite`) | Model for variants, diagnosis narratives, topics and comment classification |
 | `GEMINI_TIMEOUT_SECONDS` | `30` | Max time for one Gemini request |
 | `GEMINI_DEADLINE_SECONDS` | `60` | Max time for the whole key/model rotation; past it the API answers 504 (or the agent's evidence-only fallback) |

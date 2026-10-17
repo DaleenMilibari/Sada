@@ -42,7 +42,7 @@ from backend.agents.instagram_client import InstagramClient, InstagramRateLimite
 from backend.agents.x_client import XClient, XRateLimited
 from backend.agents.youtube_client import QuotaExceeded, YouTubeClient, parse_duration
 from backend.sba_channels import SBA_CHANNELS
-from backend.topics import TOPICS, classify_by_rules
+from backend.topics import TOPIC_HINTS, TOPICS, classify_by_rules
 
 logger = logging.getLogger("sada.collector")
 
@@ -259,13 +259,14 @@ def _refine_topics_with_llm(engine: Engine, limit: int) -> int:
             .limit(limit)
         ).all()
     classified = 0
-    topic_list = ", ".join(f'"{k}" ({v})' for k, v in TOPICS.items())
+    topic_list = "\n".join(f'- "{k}" ({v}): {TOPIC_HINTS.get(k, "")}' for k, v in TOPICS.items())
     for i in range(0, len(pending), LLM_BATCH_SIZE):
         batch = pending[i : i + LLM_BATCH_SIZE]
         lines = "\n".join(f"{vid} | {channel} | {title}" for vid, title, channel in batch)
         prompt = (
-            "صنّف كل فيديو من قنوات هيئة الإذاعة والتلفزيون السعودية إلى موضوع واحد فقط من القائمة التالية: "
-            f"{topic_list}.\n"
+            "صنّف كل منشور من حسابات هيئة الإذاعة والتلفزيون السعودية إلى موضوع واحد فقط من القائمة التالية، "
+            'واختر الأدق، ولا تستخدم "other" إلا إذا لم يناسبه أي موضوع آخر:\n'
+            f"{topic_list}\n"
             "كل سطر بالشكل: معرف الفيديو | القناة | العنوان.\n"
             f"{lines}\n"
             'أعد كائن JSON فقط يربط كل معرف فيديو بمفتاح الموضوع بالإنجليزية، مثال: {"abc123": "news"}'

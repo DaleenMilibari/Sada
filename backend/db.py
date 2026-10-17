@@ -72,7 +72,7 @@ videos = Table(
     # "short" | "video" | "live" | "image" | "carousel" | "text" (X posts without media)
     Column("content_type", String(16), nullable=False),
     Column("topic", String(32), nullable=False),
-    # "rule" | "llm"
+    # "rule" | "llm" - see backend/topics.py for the taxonomy
     Column("topic_source", String(16), nullable=False),
     # NULL for Instagram posts: the API doesn't expose other accounts' views.
     Column("view_count", BigInteger),
@@ -159,6 +159,14 @@ follower_snapshots = Table(
     Column("captured_at", DateTime(timezone=True), nullable=False),
     Column("followers", BigInteger, nullable=False),
     Index("ix_follower_snapshots_channel_captured", "channel_id", "captured_at"),
+)
+
+# Small key/value store for one-off data migrations (e.g. "topic_taxonomy" -> "2").
+app_meta = Table(
+    "app_meta",
+    metadata,
+    Column("key", String(64), primary_key=True),
+    Column("value", String(200), nullable=False),
 )
 
 collector_runs = Table(

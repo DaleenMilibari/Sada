@@ -1,10 +1,13 @@
-"""Shared, lazily-initialized Gemini client for the agents that use one.
+"""Shared, lazily-initialized LLM client (OpenAI and/or Gemini) for the agents that use one.
 
 Kept out of behavior_analysis_agent.py and live_clip_detection_agent.py
 deliberately - those two are pure statistics over the seeded data and
 never need an API key.
 
-GEMINI_API_KEY may hold several comma-separated keys. When a key hits its quota
+When OPENAI_API_KEY is set, OPENAI_MODEL (then each OPENAI_FALLBACK_MODEL) is tried
+first and Gemini is only the fallback; without it, Gemini alone serves every request.
+
+GEMINI_API_KEY (and OPENAI_API_KEY) may hold several comma-separated keys. When a key hits its quota
 (HTTP 429) - or a model isn't offered to that key's project (HTTP 404, e.g. older
 models are closed to new accounts) - the next key is tried; when every key is
 exhausted on GEMINI_MODEL, the keys are tried on each GEMINI_FALLBACK_MODEL in order
@@ -28,14 +31,14 @@ _clients: dict[str, object] = {}
 _exhausted: dict[tuple[str, str], float] = {}  # (key, model) -> monotonic time it ran out
 _lock = threading.Lock()
 EXHAUSTED_COOLDOWN_S = 3600
-# One Gemini request may take at most this long; the whole key/model rotation at most
+# One LLM request may take at most this long; the whole key/model rotation at most
 # DEADLINE_S, so an API request never hangs on a slow or stuck model.
 REQUEST_TIMEOUT_S = float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "30"))
 DEADLINE_S = float(os.environ.get("GEMINI_DEADLINE_SECONDS", "60"))
 
 
 class MissingApiKeyError(RuntimeError):
-    """Raised when an LLM-backed step is invoked without GEMINI_API_KEY set."""
+    """Raised when an LLM-backed step is invoked without OPENAI_API_KEY or GEMINI_API_KEY set."""
 
 
 class QuotaExhaustedError(RuntimeError):
@@ -59,13 +62,18 @@ def _load_env() -> None:
         pass
 
 
+def _keys(var: str) -> list[str]:
+    return [k.strip() for k in os.environ.get(var, "").split(",") if k.strip()]
+
+
 def get_keys() -> list[str]:
+    """Gemini keys (raises only when neither provider has a key)."""
     _load_env()
-    keys = [k.strip() for k in os.environ.get("GEMINI_API_KEY", "").split(",") if k.strip()]
-    if not keys:
+    keys = _keys("GEMINI_API_KEY")
+    if not keys and not _keys("OPENAI_API_KEY"):
         raise MissingApiKeyError(
-            "GEMINI_API_KEY is not set. Copy backend/.env.example to backend/.env "
-            "and fill in a key, or export it in your shell."
+            "Neither OPENAI_API_KEY nor GEMINI_API_KEY is set. Copy backend/.env.example to "
+            "backend/.env and fill in a key, or export it in your shell."
         )
     return keys
 
@@ -87,24 +95,68 @@ def _client_for(key: str):
         return _clients[key]
 
 
+def _openai_client_for(key: str):
+    with _lock:
+        if ("openai", key) not in _clients:
+            from openai import OpenAI
+
+            # max_retries=0 for the same reason as Gemini's attempts=1.
+            _clients[("openai", key)] = OpenAI(api_key=key, timeout=REQUEST_TIMEOUT_S, max_retries=0)
+        return _clients[("openai", key)]
+
+
 def get_client():
     """Client for the first configured key (kept for callers that need the raw SDK)."""
     return _client_for(get_keys()[0])
 
 
-def get_model() -> str:
+def _gemini_model() -> str:
     return os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+
+
+def get_model() -> str:
+    """The model that serves requests when nothing is exhausted (recorded next to saved results)."""
+    _load_env()
+    if _keys("OPENAI_API_KEY"):
+        return os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+    return _gemini_model()
 
 
 DEFAULT_FALLBACKS = "gemini-3.5-flash,gemini-3.5-flash-lite"  # 2.5 models are closed to new keys
 
 
-def get_models() -> list[str]:
-    models = [get_model()]
-    for m in os.environ.get("GEMINI_FALLBACK_MODEL", DEFAULT_FALLBACKS).split(","):
+def _model_list(primary: str, fallbacks: str) -> list[str]:
+    models = [primary]
+    for m in fallbacks.split(","):
         if m.strip() and m.strip() not in models:
             models.append(m.strip())
     return models
+
+
+def get_models() -> list[str]:
+    """Gemini models in the order they are tried."""
+    return _model_list(_gemini_model(), os.environ.get("GEMINI_FALLBACK_MODEL", DEFAULT_FALLBACKS))
+
+
+def _candidates() -> list[tuple[str, str, str]]:
+    """(provider, model, key) in the order they are tried: OpenAI first when configured, then Gemini."""
+    gemini_keys = get_keys()
+    openai_keys = _keys("OPENAI_API_KEY")
+    out = []
+    if openai_keys:
+        models = _model_list(os.environ.get("OPENAI_MODEL", "gpt-5-mini"), os.environ.get("OPENAI_FALLBACK_MODEL", ""))
+        out += [("openai", m, k) for m in models for k in openai_keys]
+    out += [("gemini", m, k) for m in get_models() for k in gemini_keys]
+    return out
+
+
+def _status(e: Exception):
+    """HTTP status of an SDK error: Gemini puts it on .code, OpenAI on .status_code (its .code is a string)."""
+    for attr in ("status_code", "code"):
+        value = getattr(e, attr, None)
+        if isinstance(value, int):
+            return value
+    return None
 
 
 OVERLOAD_RETRIES = 2
@@ -115,46 +167,56 @@ def _is_overloaded(e: Exception) -> bool:
     """A temporary capacity spike (500/503/504) or a timed-out request - worth a short retry, then another model."""
     if isinstance(e, TimeoutError) or "timeout" in type(e).__name__.lower():
         return True
-    return getattr(e, "code", None) in (500, 503, 504) or "UNAVAILABLE" in str(e) or "DEADLINE_EXCEEDED" in str(e)
+    return _status(e) in (500, 502, 503, 504) or "UNAVAILABLE" in str(e) or "DEADLINE_EXCEEDED" in str(e)
 
 
 def _is_unavailable(e: Exception) -> bool:
-    """Out of quota (429) or the model isn't offered to this key (404) - try the next key/model."""
-    code = getattr(e, "code", None)
-    return code in (404, 429) or "RESOURCE_EXHAUSTED" in str(e) or "NOT_FOUND" in str(e)
+    """Out of quota (429), a rejected key (401/403) or a model not offered to it (404) - try the next key/model."""
+    return _status(e) in (401, 403, 404, 429) or "RESOURCE_EXHAUSTED" in str(e) or "NOT_FOUND" in str(e)
+
+
+def _call(provider: str, model: str, key: str, prompt: str) -> str:
+    if provider == "openai":
+        response = _openai_client_for(key).chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        return response.choices[0].message.content
+    from google.genai import types
+
+    response = _client_for(key).models.generate_content(
+        model=model,
+        contents=prompt,
+        config=types.GenerateContentConfig(response_mime_type="application/json"),
+    )
+    return response.text
 
 
 def generate_json(prompt: str) -> str:
-    """Call Gemini constrained to JSON output and return the raw text, rotating keys/models on quota errors."""
-    from google.genai import types
-
-    keys = get_keys()
+    """Call the LLM constrained to JSON output and return the raw text, rotating providers/keys/models on quota errors."""
+    candidates = _candidates()
     now = time.monotonic()
     last: Exception | None = None
-    for model in get_models():
-        for key in keys:
-            ran_out = _exhausted.get((key, model))
-            if ran_out is not None and now - ran_out < EXHAUSTED_COOLDOWN_S:
-                continue
-            for attempt in range(OVERLOAD_RETRIES + 1):
-                if time.monotonic() - now > DEADLINE_S:
-                    raise DeadlineExceededError(f"Gemini did not answer within {DEADLINE_S:.0f}s: {last}")
-                try:
-                    response = _client_for(key).models.generate_content(
-                        model=model,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(response_mime_type="application/json"),
-                    )
-                    return response.text
-                except Exception as e:
-                    last = e
-                    if _is_overloaded(e) and attempt < OVERLOAD_RETRIES:
-                        time.sleep(OVERLOAD_BACKOFF_S * (attempt + 1))  # temporary spike: same key/model again
-                        continue
-                    if not (_is_unavailable(e) or _is_overloaded(e)):
-                        raise
-                    logger.warning("Gemini key #%d unavailable on %s (%s) - trying the next one", keys.index(key) + 1, model, getattr(e, "code", "?"))
-                    if _is_unavailable(e):  # quota / not offered: skip for the cooldown; overload: just move on this time
-                        _exhausted[(key, model)] = time.monotonic()
-                    break
-    raise QuotaExhaustedError(f"No Gemini key/model could serve the request ({', '.join(get_models())}): {last}")
+    for provider, model, key in candidates:
+        ran_out = _exhausted.get((key, model))
+        if ran_out is not None and now - ran_out < EXHAUSTED_COOLDOWN_S:
+            continue
+        for attempt in range(OVERLOAD_RETRIES + 1):
+            if time.monotonic() - now > DEADLINE_S:
+                raise DeadlineExceededError(f"The LLM did not answer within {DEADLINE_S:.0f}s: {last}")
+            try:
+                return _call(provider, model, key, prompt)
+            except Exception as e:
+                last = e
+                if _is_overloaded(e) and attempt < OVERLOAD_RETRIES:
+                    time.sleep(OVERLOAD_BACKOFF_S * (attempt + 1))  # temporary spike: same key/model again
+                    continue
+                if not (_is_unavailable(e) or _is_overloaded(e)):
+                    raise
+                logger.warning("%s key unavailable on %s (%s) - trying the next one", provider, model, _status(e) or "?")
+                if _is_unavailable(e):  # quota / not offered: skip for the cooldown; overload: just move on this time
+                    _exhausted[(key, model)] = time.monotonic()
+                break
+    tried = ", ".join(dict.fromkeys(m for _, m, _ in candidates))
+    raise QuotaExhaustedError(f"No LLM key/model could serve the request ({tried}): {last}")

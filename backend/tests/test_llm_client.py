@@ -21,6 +21,7 @@ class FakeModels:
 @pytest.fixture()
 def fake(monkeypatch):
     log, exhausted = [], set()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("GEMINI_API_KEY", "k1, k2")
     monkeypatch.setenv("GEMINI_MODEL", "flash")
     monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "lite")
@@ -54,6 +55,7 @@ def test_all_exhausted_raises_clear_error(fake):
 def test_missing_key(monkeypatch):
     monkeypatch.setattr(llm_client, "_load_env", lambda: None)
     monkeypatch.setenv("GEMINI_API_KEY", " ")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(llm_client.MissingApiKeyError):
         llm_client.get_keys()
 
@@ -112,3 +114,50 @@ def test_rotation_stops_at_the_deadline(fake, monkeypatch):
     monkeypatch.setattr(llm_client, "DEADLINE_S", -1)
     with pytest.raises(llm_client.DeadlineExceededError):
         llm_client.generate_json("p")
+
+
+class OpenAIQuotaError(Exception):
+    status_code = 429
+    code = "insufficient_quota"  # OpenAI's .code is a string, not the HTTP status
+
+
+def _fake_openai(monkeypatch, log, exhausted):
+    def create(key):
+        def _create(model, messages, response_format):
+            log.append((key, model))
+            if (key, model) in exhausted:
+                raise OpenAIQuotaError("429")
+            msg = type("M", (), {"content": f'{{"by": "{key}/{model}"}}'})()
+            return type("R", (), {"choices": [type("Ch", (), {"message": msg})()]})()
+        return _create
+
+    completions = lambda key: type("X", (), {"create": staticmethod(create(key))})()
+    monkeypatch.setattr(
+        llm_client, "_openai_client_for",
+        lambda key: type("O", (), {"chat": type("Chat", (), {"completions": completions(key)})()})(),
+    )
+
+
+def test_openai_first_then_gemini_fallback(fake, monkeypatch):
+    log, exhausted = fake
+    monkeypatch.setenv("OPENAI_API_KEY", "o1")
+    monkeypatch.setenv("OPENAI_MODEL", "mini")
+    monkeypatch.delenv("OPENAI_FALLBACK_MODEL", raising=False)
+    _fake_openai(monkeypatch, log, exhausted)
+
+    assert llm_client.get_model() == "mini"
+    assert llm_client.generate_json("p") == '{"by": "o1/mini"}'
+
+    exhausted.add(("o1", "mini"))
+    assert llm_client.generate_json("p") == '{"by": "k1/flash"}'  # OpenAI out of quota: Gemini takes over
+
+
+def test_openai_only_without_gemini_key(monkeypatch):
+    log, exhausted = [], set()
+    monkeypatch.setattr(llm_client, "_load_env", lambda: None)
+    monkeypatch.setattr(llm_client, "_exhausted", {})
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "o1")
+    monkeypatch.setenv("OPENAI_MODEL", "mini")
+    _fake_openai(monkeypatch, log, exhausted)
+    assert llm_client.generate_json("p") == '{"by": "o1/mini"}'

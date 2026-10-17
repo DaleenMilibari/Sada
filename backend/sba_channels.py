@@ -32,6 +32,9 @@ BY_ENTITY = {c["entity_key"]: c for c in SBA_CHANNELS}
 SBA_INSTAGRAM_ACCOUNTS: list[dict[str, str]] = [
     {"entity_key": "saudiya", "username": "saudiyatv"},
     {"entity_key": "sbc", "username": "sbc_channel"},  # confirmed by the team lead, 2026-10-17
+    # The authority's own account - its posts are in backend/data/dataset_instagram-scraper_*.json
+    # (loaded with python -m backend.instagram_import).
+    {"entity_key": "sba", "username": "sbagovsa"},
 ]
 
 
