@@ -367,3 +367,15 @@ def test_failed_theme_analysis_is_not_saved(engine, monkeypatch):
     assert audience_agent.themes(days=30)["status"] == "llm_failed"
     with engine.connect() as conn:
         assert conn.execute(select(db.audience_themes)).first() is None
+
+
+def test_windows_with_the_same_comments_share_one_theme_analysis(engine, monkeypatch):
+    add_post(engine, "v1")
+    for i in range(3):
+        add_comment(engine, f"r{i}", "v1", sentiment="neutral", intent="request", text=f"طلب {i}")
+    answer = {"themes": [{"title": "طلبات", "kind": "request", "recommendation": "نفّذ", "topic": "other", "members": [0, 1, 2]}]}
+    calls = []
+    monkeypatch.setattr(llm_client, "generate_json", lambda p: calls.append(p) or json.dumps(answer))
+    audience_agent.themes(days=30)
+    wide = audience_agent.themes(days=3650)
+    assert len(calls) == 1 and wide["from_cache"] is True and wide["days"] == 3650

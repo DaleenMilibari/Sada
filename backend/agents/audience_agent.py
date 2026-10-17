@@ -458,24 +458,25 @@ def build_themes(days: int = 30, platform: str | None = None) -> dict[str, Any]:
     return result
 
 
-def _themes_key(days: int, platform: str | None, rows: list[dict[str, Any]]) -> str:
+def _themes_key(platform: str | None, rows: list[dict[str, Any]]) -> str:
+    """The comments themselves decide: two windows holding the same comments share one analysis."""
     ids = sorted(r["comment_id"] for r in rows)
-    return hashlib.sha1(json.dumps([days, platform, ids]).encode("utf-8")).hexdigest()
+    return hashlib.sha1(json.dumps([platform, ids]).encode("utf-8")).hexdigest()
 
 
 def themes(days: int = 30, platform: str | None = None) -> dict[str, Any]:
-    """One Gemini call per (window, platform, exact comment set), saved in the database.
+    """One Gemini call per (platform, exact comment set), saved in the database.
 
     The same comments always give the saved result back - across page loads, restarts and
     seed imports. New comments change the key, so the analysis is redone only when there is
     something new to say. Failures (no key, model down) are not saved, so the next call retries.
     """
-    key = _themes_key(days, platform, _theme_comments(days, platform))
+    key = _themes_key(platform, _theme_comments(days, platform))
     t = db.audience_themes.c
     with db.get_engine().connect() as conn:
         saved = conn.execute(select(t.result).where(t.cache_key == key)).scalar()
     if saved:
-        return {**json.loads(saved), "from_cache": True}
+        return {**json.loads(saved), "days": days, "from_cache": True}
     result = build_themes(days, platform)
     if result["status"] in ("ok", "not_enough_comments"):
         row = {"cache_key": key, "result": json.dumps(result, ensure_ascii=False, default=str), "created_at": db.utcnow()}

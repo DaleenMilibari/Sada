@@ -134,7 +134,7 @@ diagnoses = Table(
 audience_themes = Table(
     "audience_themes",
     metadata,
-    Column("cache_key", String(40), primary_key=True),  # sha1 of (days, platform, comment ids)
+    Column("cache_key", String(40), primary_key=True),  # sha1 of (platform, comment ids)
     Column("result", Text, nullable=False),  # the AudienceThemes JSON
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
