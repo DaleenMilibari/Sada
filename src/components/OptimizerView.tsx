@@ -6,6 +6,13 @@ import {
 import { ApiError, apiFetch, describeError } from '../lib/api';
 import type { OptimizerDraft } from '../types';
 
+// Mirrors backend/schemas.py::DraftSuggestion.
+interface DraftSuggestion {
+  text: string;
+  source: 'ai' | 'recent_post' | 'generic';
+  based_on: { title: string; url: string; channel_name_ar: string; platform: string; performance_index: number }[];
+}
+
 interface OptimizerViewProps {
   onNotify?: (title: string, desc?: string, type?: 'success' | 'info') => void;
   initialDraft?: OptimizerDraft | null; // opened from an insight, e.g. an audience request
@@ -118,7 +125,11 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
   const [channels, setChannels] = useState<ChannelOut[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(true);
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
-  const [content, setContent] = useState(initialDraft?.text || TEMPLATES[0].text);
+  // A draft from the playbook has no text yet: it is written from recent top posts once accounts load.
+  const autoSuggest = !!initialDraft && !initialDraft.text;
+  const [content, setContent] = useState(autoSuggest ? '' : initialDraft?.text || TEMPLATES[0].text);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestion, setSuggestion] = useState<DraftSuggestion | null>(null);
   const [tone, setTone] = useState<(typeof TONES)[number]>('تفاعلي');
   const [contentType, setContentType] = useState(initialDraft?.contentType ?? 'video');
   const [topic, setTopic] = useState(initialDraft?.topic ?? 'national_event');
@@ -157,6 +168,33 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const suggestDraft = async (channelOptions: string[] = selectedChannels) => {
+    setSuggesting(true);
+    try {
+      const res = await apiFetch<DraftSuggestion>('/api/draft/suggest', {
+        method: 'POST',
+        body: JSON.stringify({ topic, content_type: contentType, channel_options: channelOptions }),
+      });
+      setContent(res.text);
+      setSuggestion(res);
+    } catch (err) {
+      const { title, desc } = describeError(err);
+      onNotify?.(title, desc, 'info');
+      if (!content) setContent(TEMPLATES[0].text);
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const autoSuggested = useRef(false);
+  useEffect(() => {
+    if (autoSuggest && !channelsLoading && !autoSuggested.current) {
+      autoSuggested.current = true;
+      suggestDraft();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelsLoading]);
 
   const channelsByPlatform = {
     youtube: channels.filter((c) => c.platform === 'youtube'),
@@ -384,19 +422,50 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
               <label htmlFor="draft" className="text-xs font-bold text-slate-500 font-arabic">
                 الوصف الأولي للمحتوى
               </label>
-              <span className={`text-[11px] ${content.length > 280 ? 'text-amber-600 font-bold' : 'text-slate-400'}`}>
-                {content.length} / 280
-              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => suggestDraft()}
+                  disabled={suggesting || channelsLoading}
+                  title="يكتب وصفاً جديداً من أحدث منشورات الهيئة الأعلى أداءً في الموضوع والحسابات المختارة"
+                  className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-lg font-arabic cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {suggesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                  اقترح وصفاً
+                </button>
+                <span className={`text-[11px] ${content.length > 280 ? 'text-amber-600 font-bold' : 'text-slate-400'}`}>
+                  {content.length} / 280
+                </span>
+              </div>
             </div>
             <textarea
               id="draft"
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="اكتب فكرة المنشور الأولية..."
+              placeholder={suggesting ? 'يكتب الذكاء الاصطناعي وصفاً من أحدث المنشورات الأعلى أداءً...' : 'اكتب فكرة المنشور الأولية...'}
               rows={4}
               maxLength={2000}
               className="w-full text-right text-sm text-slate-800 placeholder:text-slate-300 bg-slate-50 border border-slate-200 rounded-xl p-3 font-arabic outline-none resize-none focus:border-emerald-500 transition-all leading-relaxed"
             />
+            {suggestion && suggestion.based_on.length > 0 && (
+              <div className="mt-2">
+                <p className="text-[10px] text-slate-400 font-arabic mb-1">
+                  {suggestion.source === 'ai' ? 'مستوحى من أحدث منشورات الهيئة الأعلى أداءً في هذا الموضوع:' : 'مبني على أقوى منشور حديث في هذا الموضوع:'}
+                </p>
+                <ul className="space-y-0.5">
+                  {suggestion.based_on.slice(0, 2).map((b) => (
+                    <li key={b.url}>
+                      <a href={b.url} target="_blank" rel="noreferrer" className="text-[10px] text-slate-500 hover:text-emerald-700 font-arabic line-clamp-1">
+                        «{b.title}» · {b.channel_name_ar} · {b.performance_index.toFixed(1)}× المعتاد
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {suggestion?.source === 'generic' && (
+              <p className="text-[10px] text-amber-700 font-arabic mt-2">لا توجد منشورات حديثة في هذا الموضوع لاستلهام الوصف منها - اكتب فكرتك.</p>
+            )}
           </div>
 
           {/* CTA Button */}

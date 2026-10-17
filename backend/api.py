@@ -19,7 +19,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException,
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from backend import analytics, auth, config, db, playbook, repository
+from backend import analytics, auth, config, db, draft_suggest, playbook, repository
 from backend.agents import (
     audience_agent,
     behavior_analysis_agent,
@@ -33,6 +33,8 @@ from backend.agents import (
 )
 from backend.rate_limit import limit_llm, limit_login
 from backend.schemas import (
+    DraftSuggestion,
+    DraftSuggestRequest,
     Playbook,
     AudienceAccuracy,
     AudienceThemes,
@@ -294,6 +296,12 @@ def get_analytics_summary(
     platform: Literal["youtube", "instagram", "x"] | None = None,
 ):
     return analytics.summary(days, platform)
+
+
+@api.post("/draft/suggest", response_model=DraftSuggestion, dependencies=[Depends(limit_llm)])
+def post_draft_suggest(req: DraftSuggestRequest):
+    """A first description for a new post, from SBA's best-performing recent posts on the topic."""
+    return draft_suggest.suggest(req.topic, req.content_type, req.channel_options)
 
 
 @api.get("/playbook", response_model=Playbook)

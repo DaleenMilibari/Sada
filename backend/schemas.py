@@ -636,3 +636,26 @@ class Playbook(BaseModel):
     days: int
     min_topic_posts: int
     topics: list[PlaybookTopic]
+
+
+# --- Draft suggestion (backend/draft_suggest.py) ---
+
+
+class DraftSuggestRequest(BaseModel):
+    topic: str = Field(max_length=40)
+    content_type: str = Field(default="video", max_length=20)
+    channel_options: list[str] = Field(default_factory=list, max_length=30)
+
+
+class DraftExample(BaseModel):
+    title: str
+    url: str
+    channel_name_ar: str
+    platform: Literal["youtube", "instagram", "x"]
+    performance_index: float
+
+
+class DraftSuggestion(BaseModel):
+    text: str
+    source: Literal["ai", "recent_post", "generic"]  # generic = no recent posts on this topic
+    based_on: list[DraftExample]
