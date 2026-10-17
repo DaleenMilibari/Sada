@@ -22,9 +22,10 @@ from sqlalchemy import DateTime, insert, select
 from backend import db
 
 # Parents before children (foreign keys). Everything a collector run paid for travels with the seed.
-TABLES = [db.channels, db.videos, db.video_snapshots, db.audience_comments, db.audience_labels, db.follower_snapshots, db.diagnoses]
+TABLES = [db.channels, db.videos, db.video_snapshots, db.audience_comments, db.audience_labels, db.follower_snapshots, db.diagnoses,
+          db.audience_themes]
 KEYS = {"channels": "channel_id", "videos": "video_id", "audience_comments": "comment_id", "audience_labels": "comment_id",
-        "diagnoses": "video_id"}
+        "diagnoses": "video_id", "audience_themes": "cache_key"}
 # Time series have no natural key: a row is already present when its (owner, captured_at) is.
 SERIES_OWNER = {"video_snapshots": "video_id", "follower_snapshots": "channel_id"}
 

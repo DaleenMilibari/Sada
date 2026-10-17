@@ -4,7 +4,7 @@ Each agent lives in its own file under `backend/agents/` and returns structured 
 
 Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, Tools, Data/Context, Reasoning task, Decision, Action/Output, Memory/state, Evidence, Failure/fallback. No agent is a single LLM prompt. Each one visibly chooses between options, uses evidence, and produces a structured decision.
 
-> **Numbering.** Code comments say "Task N" after the build task that created the code: Tasks 1–4 of the original MVP (Behavior, Optimizer, Diagnosis, Live clip), Task 5 (Data Collector), and Tasks 1–4 of the hackathon plan in [team.md](team.md). The sections below are ordered by agent instead.
+> **Numbering.** Code comments say "Task N" after the build task that created the code: Tasks 1–4 of the original MVP (Behavior, Optimizer, Diagnosis, Live clip), Task 5 (Data Collector), and Tasks 1–4 of the hackathon plan (Patterns & Optimizer, Trends, Dashboard, Alerts & Diagnosis; the plan itself is in git history as `team.md`). The sections below are ordered by agent instead.
 
 ---
 

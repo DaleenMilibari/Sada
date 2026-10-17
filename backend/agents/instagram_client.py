@@ -5,7 +5,7 @@ business/creator account's public profile and posts: followers, captions,
 timestamps, likes (unless hidden) and comment counts. It does not expose
 views, reach or shares for accounts we don't own.
 
-Setup (Meta app, token, our account id) is described in DATA_COLLECTION.md.
+Setup (Meta app, token, our account id) is described in DEPLOYMENT.md section 3.
 """
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ class InstagramClient:
                 err = _error(res)
                 code, subcode = err.get("code"), err.get("error_subcode")
                 if code in _AUTH_CODES:
-                    raise InstagramAuthError("Instagram access token is invalid or expired - generate a new one (DATA_COLLECTION.md).")
+                    raise InstagramAuthError("Instagram access token is invalid or expired - generate a new one (DEPLOYMENT.md section 3).")
                 if code in _RATE_LIMIT_CODES:
                     raise InstagramRateLimited(f"Instagram API rate limit reached (code {code}).")
                 if subcode in _NOT_FOUND_SUBCODES or code == 110:

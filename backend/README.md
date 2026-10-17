@@ -58,7 +58,7 @@ python -m backend.db_tools export backend/data/sba_youtube_seed.json.gz
 python -m backend.db_tools import backend/data/sba_youtube_seed.json.gz
 ```
 
-A platform without credentials is skipped. Budgets, refresh schedules and per-platform details are in [AGENT_SPEC.md](../AGENT_SPEC.md#1-data-collector-agent). API key setup is in [DATA_COLLECTION.md](../DATA_COLLECTION.md). Keep `COLLECTOR_SCHEDULE_ENABLED=false` locally so `--reload` doesn't spend quota.
+A platform without credentials is skipped. Budgets, refresh schedules and per-platform details are in [AGENT_SPEC.md](../AGENT_SPEC.md#1-data-collector-agent). API key setup is in [DEPLOYMENT.md](../DEPLOYMENT.md) sections 1–7. Keep `COLLECTOR_SCHEDULE_ENABLED=false` locally so `--reload` doesn't spend quota.
 
 The shared seed (`sba_youtube_seed.json.gz`) holds the 9 YouTube channels and 2,901 videos from the first backfill. X, Instagram and audience data only exist where those collectors have run.
 

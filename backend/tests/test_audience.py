@@ -338,3 +338,32 @@ def test_classification_stops_once_every_key_is_out_of_quota(engine, monkeypatch
     monkeypatch.setattr(llm_client, "generate_json", exhausted)
     assert audience_agent.classify_pending(10_000) == 0
     assert len(calls) == 1  # the remaining batches wait for the next run
+
+
+def test_themes_are_saved_in_the_database_and_redone_only_for_new_comments(engine, monkeypatch):
+    add_post(engine, "v1")
+    for i in range(3):
+        add_comment(engine, f"r{i}", "v1", sentiment="neutral", intent="request", likes=10 - i, text=f"نبي برامج قديمة {i}")
+    answer = {"themes": [{"title": "برامج أرشيفية", "kind": "request", "recommendation": "أعد بثها", "topic": "other", "members": [0, 1, 2]}]}
+    calls = []
+    monkeypatch.setattr(llm_client, "generate_json", lambda p: calls.append(p) or json.dumps(answer))
+
+    first = audience_agent.themes(days=30)
+    audience_agent.clear_cache()  # nothing in memory - like a restart
+    second = audience_agent.themes(days=30)
+    assert len(calls) == 1
+    assert first["from_cache"] is False and second["from_cache"] is True
+    assert second["themes"][0]["title"] == "برامج أرشيفية"
+
+    add_comment(engine, "r9", "v1", sentiment="negative", intent="criticism", text="الصوت ضعيف")
+    assert audience_agent.themes(days=30)["from_cache"] is False and len(calls) == 2
+
+
+def test_failed_theme_analysis_is_not_saved(engine, monkeypatch):
+    add_post(engine, "v1")
+    for i in range(3):
+        add_comment(engine, f"r{i}", "v1", sentiment="neutral", intent="request", text=f"طلب {i}")
+    monkeypatch.setattr(llm_client, "generate_json", lambda p: (_ for _ in ()).throw(RuntimeError("down")))
+    assert audience_agent.themes(days=30)["status"] == "llm_failed"
+    with engine.connect() as conn:
+        assert conn.execute(select(db.audience_themes)).first() is None

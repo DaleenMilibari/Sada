@@ -583,6 +583,8 @@ class AudienceThemes(BaseModel):
     n_comments: int  # request + criticism comments considered
     status: Literal["ok", "not_enough_comments", "no_llm", "llm_failed"]
     themes: list[AudienceTheme]
+    # True when this analysis was saved earlier for the exact same comments (no Gemini call).
+    from_cache: bool = False
 
 
 # --- Publishing playbook (backend/playbook.py) ---

@@ -129,6 +129,16 @@ diagnoses = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+# Audience themes (audience_agent.themes): one Gemini analysis per exact set of comments,
+# kept so a page load, a restart or a teammate's seed import never repeats it.
+audience_themes = Table(
+    "audience_themes",
+    metadata,
+    Column("cache_key", String(40), primary_key=True),  # sha1 of (days, platform, comment ids)
+    Column("result", Text, nullable=False),  # the AudienceThemes JSON
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
 # Blind human labels for a sample of audience comments - the ground truth that the
 # agent's classification accuracy is measured against (audience_agent.accuracy()).
 audience_labels = Table(

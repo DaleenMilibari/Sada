@@ -27,7 +27,7 @@ BY_ENTITY = {c["entity_key"]: c for c in SBA_CHANNELS}
 #
 # STATUS: UNVERIFIED. Only "saudiyatv" came from our source list. Whoever sets up
 # the Meta app verifies each handle in the Graph API Explorer and adds the rest
-# (steps in DATA_COLLECTION.md). An unknown/non-business handle is skipped and
+# (steps in DEPLOYMENT.md section 3). An unknown/non-business handle is skipped and
 # reported in the collector run's error field - it never breaks the run.
 SBA_INSTAGRAM_ACCOUNTS: list[dict[str, str]] = [
     {"entity_key": "saudiya", "username": "saudiyatv"},
