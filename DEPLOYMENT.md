@@ -2,7 +2,7 @@
 
 How Sada gets its data, how to create every key, and how to deploy it.
 
-- **Sections 1–7: data and keys.** Key safety, Gemini, Instagram, X, audience comments, TikTok.
+- **Sections 1–7: data and keys.** Key safety, Gemini/OpenAI, Instagram, X, audience comments, TikTok.
 - **Sections 8–12: deployment.** Render (API + Postgres), Vercel (frontend), smoke test, configuration, limitations.
 
 All data feeds one database through the **Data Collector agent** (`backend/agents/data_collector_agent.py`), so every other agent sees YouTube videos, X posts and Instagram posts side by side (`platform` field). Nobody copies numbers by hand.
@@ -25,6 +25,7 @@ All data feeds one database through the **Data Collector agent** (`backend/agent
 | Key | Who creates it | Where it goes |
 |---|---|---|
 | `GEMINI_API_KEY` | **Everyone**, their own | own `backend/.env`; the lead's also goes on Render |
+| `OPENAI_API_KEY` (optional) | **Lead only** | lead's `backend/.env` + Render. When set, it is used first and Gemini becomes the fallback |
 | `YOUTUBE_API_KEY` | **Lead only** (already done) | lead's `backend/.env` + Render |
 | `META_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ACCOUNT_ID` | **One teammate** | sent privately to the lead → Render |
 | `X_BEARER_TOKEN` | **Lead only** | lead's `backend/.env` + Render |
@@ -33,7 +34,7 @@ All data feeds one database through the **Data Collector agent** (`backend/agent
 
 ## 2. Gemini API key (everyone, 5 min)
 
-Needed locally for the Optimizer, Diagnosis and topic classification.
+Needed locally for draft suggestions, the Optimizer, Diagnosis wording, audience themes, topic and comment classification.
 
 1. Go to **[aistudio.google.com](https://aistudio.google.com)** and sign in with a Google account.
 2. Click **Get API key** → **Create API key** (pick or create any Google Cloud project).
@@ -43,11 +44,15 @@ Needed locally for the Optimizer, Diagnosis and topic classification.
    ```
 4. Restart the backend. The Optimizer should now return generated variants instead of a "not configured" message.
 
+`GEMINI_API_KEY` (and `OPENAI_API_KEY`) may hold several comma-separated keys. When a key runs out of quota, the next one is tried, then each `GEMINI_FALLBACK_MODEL`. If `OPENAI_API_KEY` is set, OpenAI (`OPENAI_MODEL`, default `gpt-5-mini`) is tried first and Gemini only as the fallback.
+
 **If it leaks:** delete it in AI Studio → API keys, then create a new one.
 
 ---
 
 ## 3. Instagram access (one teammate, ≈1 hour)
+
+> **Already in the database without this setup:** 500 posts from 5 SBA accounts (`sbagovsa`, `saudia.sa`, `alekhbariya.tv`, `riyadiyatv`, `sbc_channel`) and their comments, from Apify scraper exports in `backend/data/dataset_instagram-scraper_*.json`. Load them with `python -m backend.instagram_import <file>` (locally, or against Render's database as in section 8). The setup below is for **live** collection every 30 minutes.
 
 Business Discovery lets **our** Instagram business account read the public posts of other **business/creator** accounts, such as SBA's official ones. It's free and needs no app review for our use. Meta's menus get renamed from time to time, so if a label below differs slightly, look for the closest match.
 
@@ -91,13 +96,13 @@ You need an Instagram account **we control**. A new one is fine; it doesn't need
 In the Graph API Explorer, with the long-lived token, run (replace the id):
 
 ```
-<INSTAGRAM_BUSINESS_ACCOUNT_ID>?fields=business_discovery.username(saudiyatv){username,name,followers_count,media_count}
+<INSTAGRAM_BUSINESS_ACCOUNT_ID>?fields=business_discovery.username(saudia.sa){username,name,followers_count,media_count}
 ```
 
 - **Data comes back** → the setup works, and this is a real business account.
 - **Error "Invalid user id" or similar** → wrong handle, or not a business account.
 
-Now find SBA's official Instagram handles. Only `saudiyatv` came from our source list, and remember that 5 of our 8 YouTube handles turned out wrong. For each SBA entity:
+Now check the handles already in `SBA_INSTAGRAM_ACCOUNTS`: `sbagovsa`, `saudia.sa`, `alekhbariya.tv`, `riyadiyatv` and `sbc_channel` (their profiles and posts match each channel, from the scrape of 17 Oct). Each must return data from the query above. To add another SBA entity (remember that 5 of our 8 original YouTube handles turned out wrong):
 1. Search Instagram for the channel's Arabic name.
 2. Accept a handle only if **at least two** of these hold:
    - it has the blue verified badge
@@ -106,7 +111,7 @@ Now find SBA's official Instagram handles. Only `saudiyatv` came from our source
    - its posts match the channel's programming
 3. Run the Business Discovery query above for it. It must return data.
 
-Add every verified handle to `SBA_INSTAGRAM_ACCOUNTS` in [backend/sba_channels.py](backend/sba_channels.py): one per entity, using that entity's `entity_key` (`sba`, `saudiya`, `ekhbariya`, `sbc`, `riyadiya`, `quran_tv`, `sunnah_tv`, `thikrayat`, `quran_radio`). Open a PR titled `data: verified Instagram accounts`, and say in the description how each one was verified.
+Add every verified handle to `SBA_INSTAGRAM_ACCOUNTS` in [backend/sba_channels.py](backend/sba_channels.py): one per entity, using that entity's `entity_key` (`sba`, `saudiya`, `ekhbariya`, `sbc`, `riyadiya`, `quran_tv`, `sunnah_tv`, `thikrayat`, `quran_radio`). Commit it to `main` and say in the commit message how each one was verified.
 
 ### 3.5 Hand over
 
@@ -139,6 +144,8 @@ python -m backend.agents.data_collector_agent --platform instagram --llm-limit 0
 | Followers, post count (per account) | ✅ | |
 | Views, reach, shares, saves | ❌ | Meta only exposes these to the account's owner |
 
+The scraper exports carry the same fields (no views for posts we don't own either) plus each post's latest comments.
+
 Because Instagram has no public views, cross-platform comparisons use **`performance_index`**: each post's main metric divided by its own account's typical value. Views on YouTube, likes + comments on Instagram. Never compare raw YouTube views against Instagram likes. See `repository.analysis_records()`.
 
 **Limits:**
@@ -166,18 +173,20 @@ We read SBA's **public** posts with our own developer account's app-only bearer 
 
 ---
 
-## 6. Audience comments (YouTube + X)
+## 6. Audience comments (YouTube, X, Instagram)
 
-The collector's audience step (`backend/agents/audience_collector.py`) gathers what people say about SBA posts. The Audience agent then classifies it with Gemini (sentiment + intent).
+The collector's audience step (`backend/agents/audience_collector.py`) gathers what people say about SBA posts. Instagram comments come from the scraper exports (`backend/instagram_import.py`). The Audience agent then classifies them with the LLM (sentiment + intent) and groups requests and criticism into themes.
 
 | Source | What is read | Cost |
 |---|---|---|
 | YouTube | Top comments (up to `AUDIENCE_YT_COMMENTS_PER_VIDEO`, 100) for the `AUDIENCE_YT_VIDEOS_PER_RUN` (3) most-viewed videos per account published 1–7 days ago | 1 quota unit per video |
 | X | Up to `X_REPLIES_PER_POST` (20) replies to the `AUDIENCE_X_POSTS_PER_RUN` (10) most-seen posts per account from the last ~7 days | ≈ $0.005 per reply; `X_REPLY_BUDGET` (1,000 ≈ $5) is a hard stop across all runs |
+| Instagram | The latest comments (and their replies) on each scraped post | Free (already exported) |
 
 - **Privacy:** only the comment text, time and like count are stored. **No author name, handle or id**, so the analysis is about the audience as a whole, never about individuals.
 - Each post's comments are read once.
-- Up to `AUDIENCE_LLM_CLASSIFY_PER_RUN` (200) comments are classified per run. Without a Gemini key they stay unclassified, and are never counted as neutral.
+- Up to `AUDIENCE_LLM_CLASSIFY_PER_RUN` (200) comments are classified per run. Without an LLM key they stay unclassified, and are never counted as neutral.
+- Accuracy is measured against blind human labels: teammates label comments in the Audience view's review card (`POST /api/audience/review`), and `GET /api/audience/accuracy` compares them with the agent's labels.
 - Follower counts are snapshotted too (YouTube every 6 h, Instagram every run, X daily), so growth can be measured.
 
 ---
@@ -195,7 +204,8 @@ Deploy the **backend first**: the frontend needs its URL at build time.
 1. Push this repo to GitHub.
 2. Render dashboard → **New → Blueprint** → select the repo. Render reads `render.yaml` and creates **both** the `sada-db` Postgres and the `sada-api` web service; `DATABASE_URL` is wired automatically.
 3. When prompted, fill the secret env vars:
-   - `GEMINI_API_KEY` — Google AI Studio key.
+   - `GEMINI_API_KEY` — Google AI Studio key (comma-separate several to rotate on quota).
+   - `OPENAI_API_KEY` — optional; when set, OpenAI is used first and Gemini becomes the fallback.
    - `YOUTUBE_API_KEY` — Google Cloud key with "YouTube Data API v3" enabled (restrict it to that API).
    - `META_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ACCOUNT_ID` — from the Instagram setup (section 3). Leave them empty to collect YouTube only; you can add them later and redeploy.
    - `X_BEARER_TOKEN` — app-only X token (section 5). Leave it empty to skip X; X alone is enough to start the collector.
@@ -208,8 +218,12 @@ Deploy the **backend first**: the frontend needs its URL at build time.
    ```bash
    DATABASE_URL="<external url>" python -m backend.db_tools import backend/data/sba_youtube_seed.json.gz
    ```
-   The seed carries everything already paid for: posts, snapshots, audience comments (incl. X replies), review labels
-   and follower counts, so production never re-buys X history. After that the in-process collector keeps it fresh every 30 minutes.
+   The seed carries everything already paid for: posts, snapshots, audience comments (incl. X replies), review labels,
+   follower counts, saved diagnoses and saved audience themes, so production never re-buys X history or repeats a model call. Then load Instagram the same way:
+   ```bash
+   for f in backend/data/dataset_instagram-scraper_*.json; do DATABASE_URL="<external url>" python -m backend.instagram_import "$f"; done
+   ```
+   After that the in-process collector keeps it fresh every 30 minutes.
    Set `X_TOTAL_POST_BUDGET` on Render above the number of X posts in the seed, or X stops immediately (budget counted from stored posts). Check progress at
    `GET /api/collector/status` (logged in).
 
@@ -228,10 +242,10 @@ The `starter` plan is recommended: the free plan sleeps after inactivity (first 
 ## 10. Smoke test after deploy
 
 - [ ] Opening the site shows the login screen; wrong password → error, right password → dashboard.
-- [ ] Dashboard shows real KPIs, the platform switch, trending videos, the accuracy card and the pattern cards; "تحديث" refreshes the patterns.
-- [ ] Optimizer: a draft returns AI-generated variants, a winner, an SBA account and a publish slot.
-- [ ] Alerts (التنبيهات والتشخيص): clicking an alert returns a diagnosis with links to real posts.
-- [ ] Audience (تحليل الجمهور): sentiment, intents and follower growth load.
+- [ ] Dashboard shows real KPIs, the platform switch (YouTube, X, Instagram), trending videos, the accuracy card, the publishing playbook and the pattern cards with per-account numbers; "تحديث" refreshes the patterns.
+- [ ] Optimizer: picking a topic suggests a first draft with the posts it's based on; a draft returns AI-generated variants, a winner, an SBA account and a publish slot.
+- [ ] Alerts (التنبيهات والتشخيص): clicking an alert returns a diagnosis with its most likely root cause and links to real posts.
+- [ ] Audience (تحليل الجمهور): sentiment, intents, themes, the accuracy card and follower growth load, and Instagram comments appear.
 - [ ] `GET /api/collector/status` shows recent successful runs.
 - [ ] Logout returns to the login screen.
 
@@ -251,8 +265,10 @@ See [backend/.env.example](backend/.env.example) for all variables. Key ones:
 | `SADA_LLM_RATE_LIMIT_PER_MINUTE` | `20` | Per-IP limit on Gemini-backed routes |
 | `SADA_LOGIN_RATE_LIMIT_PER_MINUTE` | `5` | Per-IP limit on login attempts |
 | `SADA_TRUSTED_PROXY_HOPS` | `0` (`1` on Render) | Proxies in front of the app, for real client IP |
+| `OPENAI_API_KEY` | empty | Optional; comma-separated keys. When set, OpenAI is tried first |
 | `OPENAI_MODEL` | `gpt-5-mini` (then `OPENAI_FALLBACK_MODEL`, default none) | Used first whenever `OPENAI_API_KEY` is set; Gemini becomes the fallback |
-| `GEMINI_MODEL` | `gemini-3.8-flash` (falls back to `GEMINI_FALLBACK_MODEL`, default `gemini-3.5-flash,gemini-3.5-flash-lite`) | Model for variants, diagnosis narratives, topics and comment classification |
+| `GEMINI_API_KEY` | empty | Comma-separated keys, rotated when one runs out of quota |
+| `GEMINI_MODEL` | `gemini-3.8-flash` (falls back to `GEMINI_FALLBACK_MODEL`, default `gemini-3.5-flash,gemini-3.5-flash-lite`) | Model for draft suggestions, variants, diagnosis narratives, audience themes, topics and comment classification |
 | `GEMINI_TIMEOUT_SECONDS` | `30` | Max time for one Gemini request |
 | `GEMINI_DEADLINE_SECONDS` | `60` | Max time for the whole key/model rotation; past it the API answers 504 (or the agent's evidence-only fallback) |
 | `DATABASE_URL` | SQLite file | Set automatically by Render's Postgres |
@@ -261,10 +277,12 @@ See [backend/.env.example](backend/.env.example) for all variables. Key ones:
 | `COLLECTOR_QUOTA_PER_RUN` | `600` (`300` on Render) | YouTube units a run may spend (daily free quota 10,000) |
 | `COLLECTOR_LOOKBACK_DAYS` | `180` | Rolling window of uploads tracked per channel; also the history behind patterns and the best-time heatmap |
 | `COLLECTOR_MAX_VIDEOS_PER_CHANNEL` | `6000` | Cap per channel inside the window (the busiest channel uploads ~22/day) |
+| `COLLECTOR_LLM_CLASSIFY_PER_RUN` | `400` | Posts whose topic the LLM refines per run |
 | `META_ACCESS_TOKEN` | empty | Long-lived Meta user token; enables Instagram collection |
 | `INSTAGRAM_BUSINESS_ACCOUNT_ID` | empty | Our own Instagram business account id, used for Business Discovery lookups |
 | `META_GRAPH_API_VERSION` | `v23.0` | Graph API version |
 | `INSTAGRAM_REFRESH_DAYS` | `7` | Days re-read per run once an account is backfilled |
+| `INSTAGRAM_MAX_PAGES_PER_ACCOUNT` | `10` | Pages of posts read per account per run |
 | `X_BEARER_TOKEN` | empty | App-only X API token; enables X collection |
 | `X_TOTAL_POST_BUDGET` | `6000` | Hard cap on X posts read across all runs (≈ $30) |
 | `X_MAX_POSTS_PER_RUN` / `X_MAX_POSTS_PER_ACCOUNT` | `4000` / `600` | Per-run and per-account backfill caps |
@@ -274,6 +292,7 @@ See [backend/.env.example](backend/.env.example) for all variables. Key ones:
 
 ## 12. Known limitations
 
+- **Instagram is a snapshot until the Meta token is set up.** The scraper exports are from 16–17 Oct; their stats don't change until live collection starts.
 - **The Instagram token expires after 60 days.** Regenerate it per section 3.3 and update `META_ACCESS_TOKEN` on Render. `GET /api/collector/status` shows an "expired" error when this happens.
 - **X costs money per read.** The post and reply budgets are hard stops; delete `X_BEARER_TOKEN` when the project ends.
 - **Free Postgres expires after 30 days** (see section 8).

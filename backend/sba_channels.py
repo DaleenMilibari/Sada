@@ -25,16 +25,18 @@ BY_ENTITY = {c["entity_key"]: c for c in SBA_CHANNELS}
 # Official SBA Instagram accounts, read via the Graph API's Business Discovery
 # (backend/agents/instagram_collector.py). Only business/creator accounts can be read.
 #
-# STATUS: UNVERIFIED. Only "saudiyatv" came from our source list. Whoever sets up
-# the Meta app verifies each handle in the Graph API Explorer and adds the rest
-# (steps in DEPLOYMENT.md section 3). An unknown/non-business handle is skipped and
-# reported in the collector run's error field - it never breaks the run.
+# saudia.sa, alekhbariya.tv and riyadiyatv: each profile's display name is the channel's
+# own name and its posts are that channel's programming (scrape of 2026-10-17).
+# Verify any other handle (steps in DEPLOYMENT.md section 3). An unknown/non-business
+# handle is skipped and reported in the collector run's error field - it never breaks the run.
+# Scraped posts are in backend/data/dataset_instagram-scraper_*.json
+# (loaded with python -m backend.instagram_import).
 SBA_INSTAGRAM_ACCOUNTS: list[dict[str, str]] = [
-    {"entity_key": "saudiya", "username": "saudiyatv"},
+    {"entity_key": "saudiya", "username": "saudia.sa"},
+    {"entity_key": "ekhbariya", "username": "alekhbariya.tv"},
+    {"entity_key": "riyadiya", "username": "riyadiyatv"},
     {"entity_key": "sbc", "username": "sbc_channel"},  # confirmed by the team lead, 2026-10-17
-    # The authority's own account - its posts are in backend/data/dataset_instagram-scraper_*.json
-    # (loaded with python -m backend.instagram_import).
-    {"entity_key": "sba", "username": "sbagovsa"},
+    {"entity_key": "sba", "username": "sbagovsa"},  # the authority's own account
 ]
 
 
