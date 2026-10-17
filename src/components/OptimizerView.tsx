@@ -73,9 +73,8 @@ const TEMPLATES = [
   },
 ];
 
-// Display labels for the platform/entity_key a channel belongs to. SBA
-// accounts are only collected on youtube/instagram (backend/sba_channels.py);
-// x/snapchat have no real data behind them, so they're no longer offered here.
+// Display labels for the platform a channel belongs to. SBA accounts are
+// collected on youtube/instagram/x (backend/sba_channels.py).
 const PLATFORM_LABELS: Record<string, string> = {
   youtube: 'يوتيوب',
   instagram: 'إنستغرام',
@@ -115,6 +114,8 @@ const TOPICS = [
 ];
 
 const TONES = ['تفاعلي', 'رسمي', 'إخباري'] as const;
+const OTHER_TONE = 'أخرى';
+const PLATFORMS = ['youtube', 'instagram', 'x'] as const;
 
 const LOADING_STEPS = [
   { step: 1, text: 'استخراج الأنماط المفتاحية' },
@@ -138,7 +139,11 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
   const [content, setContent] = useState(autoSuggest ? '' : initialDraft?.text || TEMPLATES[0].text);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestion, setSuggestion] = useState<DraftSuggestion | null>(null);
-  const [tone, setTone] = useState<(typeof TONES)[number]>('تفاعلي');
+  const [toneChoice, setToneChoice] = useState<string>('تفاعلي');
+  const [customTone, setCustomTone] = useState('');
+  // The custom tone is a single word; blank falls back to the default voice.
+  const tone = toneChoice === OTHER_TONE ? customTone.trim() || undefined : toneChoice;
+  const draftRef = useRef<HTMLTextAreaElement>(null);
   const [contentType, setContentType] = useState(initialDraft?.contentType ?? 'video');
   const [topic, setTopic] = useState(initialDraft?.topic ?? 'national_event');
   const [isLoading, setIsLoading] = useState(false);
@@ -160,8 +165,10 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
         if (cancelled) return;
         setChannels(list);
         // A draft from an insight targets its account; otherwise pre-select everything.
+        // Selection is per platform account (channel_id): the same entity has one per platform.
         const target = initialDraft?.entityKey;
-        setSelectedChannels(target && list.some((c) => c.entity_key === target) ? [target] : list.map((c) => c.entity_key));
+        const targeted = list.filter((c) => c.entity_key === target);
+        setSelectedChannels((targeted.length ? targeted : list).map((c) => c.channel_id));
       } catch (err) {
         if (!cancelled) {
           const { title, desc } = describeError(err);
@@ -177,7 +184,10 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const suggestDraft = async (channelOptions: string[] = selectedChannels) => {
+  const selectedChannelSet = channels.filter((c) => selectedChannels.includes(c.channel_id));
+  const selectedEntityKeys = Array.from(new Set(selectedChannelSet.map((c) => c.entity_key)));
+
+  const suggestDraft = async (channelOptions: string[] = selectedEntityKeys) => {
     setSuggesting(true);
     try {
       const res = await apiFetch<DraftSuggestion>('/api/draft/suggest', {
@@ -204,15 +214,22 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelsLoading]);
 
-  const channelsByPlatform = {
-    youtube: channels.filter((c) => c.platform === 'youtube'),
-    instagram: channels.filter((c) => c.platform === 'instagram'),
+  const channelsByPlatform = Object.fromEntries(
+    PLATFORMS.map((p) => [p, channels.filter((c) => c.platform === p)])
+  ) as Record<(typeof PLATFORMS)[number], ChannelOut[]>;
+
+  const toggleChannel = (channelId: string) => {
+    setSelectedChannels((prev) =>
+      prev.includes(channelId) ? prev.filter((x) => x !== channelId) : [...prev, channelId]
+    );
   };
 
-  const toggleChannel = (entityKey: string) => {
-    setSelectedChannels((prev) =>
-      prev.includes(entityKey) ? prev.filter((x) => x !== entityKey) : [...prev, entityKey]
-    );
+  const applyTemplate = (tmpl: (typeof TEMPLATES)[number]) => {
+    setContent(tmpl.text);
+    setSuggestion(null);
+    onNotify?.('تم إدراج القالب في خانة الوصف', `«${tmpl.title}» - عدّله كما تريد ثم اضغط «تحسين واختبار المتغيرات».`, 'info');
+    draftRef.current?.focus();
+    draftRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
   const handleOptimize = async () => {
@@ -222,7 +239,6 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
     // Steps advance while the request is in flight; the last one completes when the response lands.
     stepTimer.current = setInterval(() => setLoadingStep((s) => Math.min(s + 1, LOADING_STEPS.length)), 1500);
 
-    const selectedChannelSet = channels.filter((c) => selectedChannels.includes(c.entity_key));
     const platformOptions = Array.from(new Set(selectedChannelSet.map((c) => c.platform)));
 
     try {
@@ -232,7 +248,7 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
           content_type: contentType,
           topic,
           platform_options: platformOptions,
-          channel_options: selectedChannels,
+          channel_options: selectedEntityKeys,
           original_text: content.trim(),
           tone,
         }),
@@ -295,17 +311,18 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
           )}
           {/* Quick Presets */}
           <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs">
-            <label className="block text-xs font-bold text-slate-500 font-arabic mb-2.5">
+            <label className="block text-xs font-bold text-slate-500 font-arabic mb-1">
               قوالب صياغة جاهزة
             </label>
+            <p className="text-[11px] text-slate-400 font-arabic mb-2.5">
+              اختر قالباً لتعبئة «الوصف الأولي للمحتوى» بنص جاهز تبدأ منه بدل الكتابة من الصفر.
+            </p>
             <div className="flex flex-wrap gap-2">
               {TEMPLATES.map((tmpl) => (
                 <button
                   key={tmpl.title}
-                  onClick={() => {
-                    setContent(tmpl.text);
-                    onNotify?.('تم تحميل القالب', tmpl.title, 'info');
-                  }}
+                  onClick={() => applyTemplate(tmpl)}
+                  title={tmpl.text}
                   className="px-3 py-1.5 bg-slate-50 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200 hover:border-emerald-300 rounded-xl text-xs font-bold font-arabic transition-all cursor-pointer"
                 >
                   {tmpl.title}
@@ -328,7 +345,7 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
               <p className="text-xs text-slate-400 font-arabic">لا توجد حسابات متاحة حالياً.</p>
             ) : (
               <div className="space-y-3">
-                {(['youtube', 'instagram'] as const).map((platform) =>
+                {PLATFORMS.map((platform) =>
                   channelsByPlatform[platform].length === 0 ? null : (
                     <div key={platform}>
                       <p className="text-[11px] font-bold text-slate-400 font-arabic mb-1.5">
@@ -336,11 +353,11 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {channelsByPlatform[platform].map((c) => {
-                          const isSelected = selectedChannels.includes(c.entity_key);
+                          const isSelected = selectedChannels.includes(c.channel_id);
                           return (
                             <button
-                              key={c.entity_key}
-                              onClick={() => toggleChannel(c.entity_key)}
+                              key={c.channel_id}
+                              onClick={() => toggleChannel(c.channel_id)}
                               className={`py-1.5 px-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer font-arabic flex items-center gap-1 ${
                                 isSelected
                                   ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
@@ -366,13 +383,13 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
               <label className="block text-xs font-bold text-slate-500 font-arabic mb-2">
                 نبرة الصياغة
               </label>
-              <div className="grid grid-cols-3 gap-2">
-                {TONES.map((t) => (
+              <div className="grid grid-cols-4 gap-2">
+                {[...TONES, OTHER_TONE].map((t) => (
                   <button
                     key={t}
-                    onClick={() => setTone(t)}
+                    onClick={() => setToneChoice(t)}
                     className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer font-arabic ${
-                      tone === t
+                      toneChoice === t
                         ? 'bg-slate-900 text-white border-slate-900'
                         : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                     }`}
@@ -381,6 +398,18 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
                   </button>
                 ))}
               </div>
+              {toneChoice === OTHER_TONE && (
+                <input
+                  type="text"
+                  value={customTone}
+                  // One word only: spaces are dropped as the user types.
+                  onChange={(e) => setCustomTone(e.target.value.replace(/\s+/g, ''))}
+                  maxLength={20}
+                  autoFocus
+                  placeholder="اكتب النبرة بكلمة واحدة، مثل: حماسي"
+                  className="mt-2 w-full text-right text-xs text-slate-800 placeholder:text-slate-300 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-arabic outline-none focus:border-emerald-500"
+                />
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -447,6 +476,7 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
               </div>
             </div>
             <textarea
+              ref={draftRef}
               id="draft"
               value={content}
               onChange={(e) => setContent(e.target.value)}

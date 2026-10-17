@@ -85,7 +85,7 @@ async def lifespan(_app: FastAPI):
     topics.migrate_taxonomy()  # no-op once the stored posts use the current taxonomy
     store = behavior_analysis_agent.load_store()
     # Rebuild when empty, or when written before patterns carried their dashboard fields.
-    if not store or any("title" not in p or "computed_at" not in p for p in store):
+    if not store or any("title" not in p or "computed_at" not in p or ("q_value" in p and "accounts_total" not in p) for p in store):
         patterns = behavior_analysis_agent.run()
         logger.info("Pattern store was empty or outdated - built %d pattern(s) on startup.", len(patterns))
     collector_task = None

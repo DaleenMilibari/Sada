@@ -18,6 +18,17 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 
+class AccountExample(BaseModel):
+    """A pattern in one account's own raw numbers (views on YouTube, impressions on X, likes+comments on Instagram)."""
+
+    name_ar: str
+    platform: str
+    posts: int  # this account's posts in the slice
+    usual: int  # the account's typical post
+    typical: int  # the typical post of the slice in this account
+    ratio: float  # typical / usual
+
+
 class Pattern(BaseModel):
     pattern_id: str
     pattern: str
@@ -60,6 +71,11 @@ class Pattern(BaseModel):
     n_rest: int | None = None
     share_pct: float | None = None
     computed_at: str | None = None  # ISO-8601 UTC time of the run that produced this pattern
+    # Per-post patterns: the finding in each account's own numbers, and how many of the accounts
+    # with enough posts in the slice point the same way (a pattern, not one account's quirk).
+    account_examples: list[AccountExample] | None = None
+    accounts_agree: int | None = None
+    accounts_total: int | None = None
 
 
 class EngagementRecord(BaseModel):

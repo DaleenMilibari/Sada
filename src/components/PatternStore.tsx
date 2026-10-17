@@ -25,6 +25,18 @@ interface ApiPattern {
   n_rest?: number | null;
   share_pct?: number | null; // Hajj platform-share patterns only
   computed_at?: string | null;
+  account_examples?: AccountExample[] | null; // the finding in each account's own raw numbers
+  accounts_agree?: number | null; // accounts (with enough posts in the slice) that point the same way
+  accounts_total?: number | null;
+}
+
+interface AccountExample {
+  name_ar: string;
+  platform: string;
+  posts: number;
+  usual: number; // the account's typical post (median), raw
+  typical: number; // the slice's typical post in that account, raw
+  ratio: number;
 }
 
 type CategoryKey = 'topic' | 'account' | 'content_type' | 'timing' | 'platform' | 'season';
@@ -46,6 +58,9 @@ const PLATFORM_AR: Record<string, string> = {
   youtube: 'يوتيوب', x: 'إكس', instagram: 'إنستغرام', meta: 'ميتا', tiktok: 'تيك توك',
 };
 const PLATFORM_FILTERS = ['youtube', 'x', 'instagram'] as const;
+// The unit of an account's raw numbers on each platform.
+const UNIT_AR: Record<string, string> = { youtube: 'مشاهدة', x: 'مرة ظهور', instagram: 'تفاعل' };
+const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 const SHARE_COLOR: Record<string, string> = { youtube: '#2a78d6', x: '#eb6834', meta: '#1baf7a', tiktok: '#6250d6' };
 
 const CARDS_PER_COLUMN = 4;
@@ -100,6 +115,32 @@ function ratioOf(p: ApiPattern): number {
 }
 const isUp = (p: ApiPattern) => p.lift_pct > 0;
 const isCompared = (p: ApiPattern) => p.typical_ratio != null; // post-level test vs season totals
+
+// Does the finding hold in each account on its own, or is the overall number carried by one or two?
+type Consistency = { kind: 'consistent' | 'partial' | 'mixed' | 'single'; label: string; hint: string };
+function consistencyOf(p: ApiPattern): Consistency | null {
+  const total = p.accounts_total, agree = p.accounts_agree;
+  if (total == null || agree == null || total === 0) return null;
+  if (total === 1) return { kind: 'single', label: 'خاص بحساب واحد', hint: 'النتيجة تخص هذا الحساب وحده' };
+  const share = agree / total;
+  if (share >= 0.75) {
+    return { kind: 'consistent', label: `نمط ثابت: في ${agree} من ${total} حسابات`, hint: 'يتكرر في كل حساب تقريباً، فيمكن البناء عليه' };
+  }
+  if (share >= 0.5) {
+    return { kind: 'partial', label: `في ${agree} من ${total} حسابات`, hint: 'يتكرر في بعض الحسابات دون غيرها، فتحقق من حسابك في الأمثلة' };
+  }
+  return {
+    kind: 'mixed', label: `غير ثابت: في ${agree} من ${total} حسابات فقط`,
+    hint: 'الرقم الإجمالي يحمله حساب أو اثنان، ولا يصح تعميمه على كل الحسابات',
+  };
+}
+const CONSISTENCY_CLASS: Record<Consistency['kind'], string> = {
+  consistent: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+  partial: 'text-sky-700 bg-sky-50 border-sky-200',
+  mixed: 'text-amber-800 bg-amber-50 border-amber-300',
+  single: 'text-slate-600 bg-slate-50 border-slate-200',
+};
+const fmtCount = (n: number) => compact.format(n);
 
 function signedPct(value: number): string {
   if (value === 0) return '0%';
@@ -217,7 +258,10 @@ function CategoryDonut({ patterns, active, onPick }: { patterns: ApiPattern[]; a
 
 // Diverging bars in plain HTML: Arabic labels and «» quotes keep their direction (SVG ticks garble them).
 // Each row is a button that jumps to its card.
+const BARS_EACH_END = 8; // strongest findings shown at each end before "show all"
+
 function EffectBars({ patterns, onPick }: { patterns: ApiPattern[]; onPick: (p: ApiPattern) => void }) {
+  const [showAll, setShowAll] = useState(false);
   const rows = patterns
     .filter(isCompared)
     .map((p) => ({ p, value: Math.round((ratioOf(p) - 1) * 100) }))
@@ -230,6 +274,9 @@ function EffectBars({ patterns, onPick }: { patterns: ApiPattern[]; onPick: (p: 
     );
   }
   const extent = Math.max(40, ...rows.map((r) => Math.abs(r.value)));
+  // Long lists keep the strongest results at both ends; the mild ones in the middle fold away.
+  const hidden = showAll ? 0 : Math.max(0, rows.length - 2 * BARS_EACH_END);
+  const visible = hidden ? [...rows.slice(0, BARS_EACH_END), ...rows.slice(-BARS_EACH_END)] : rows;
   return (
     <div>
       <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-3 px-1.5 pb-1 text-[10px] font-bold text-slate-400 font-arabic">
@@ -240,13 +287,22 @@ function EffectBars({ patterns, onPick }: { patterns: ApiPattern[]; onPick: (p: 
         </div>
       </div>
       <ul className="space-y-0.5">
-        {rows.map(({ p, value }) => {
+        {visible.map(({ p, value }, i) => {
           const cat = categoryOf(p);
           const width = `${(Math.abs(value) / extent) * 78}%`; // leaves room for the value label
           const color = value >= 0 ? UP : DOWN;
+          const mixed = consistencyOf(p)?.kind === 'mixed';
           const valueEl = <span className="text-[10px] font-black shrink-0" style={{ color }} dir="ltr">{signedPct(value)}</span>;
           return (
             <li key={p.pattern_id} className="group relative">
+              {hidden > 0 && i === BARS_EACH_END && (
+                <button
+                  onClick={() => setShowAll(true)}
+                  className="w-full my-1 py-1 rounded-lg border border-dashed border-slate-300 text-[11px] font-bold text-slate-500 hover:bg-slate-50 font-arabic cursor-pointer"
+                >
+                  {hidden} نتيجة أخرى بفرق أصغر · عرض الكل
+                </button>
+              )}
               <button
                 onClick={() => onPick(p)}
                 aria-label={`${p.pattern} اضغط لعرض البطاقة.`}
@@ -260,9 +316,10 @@ function EffectBars({ patterns, onPick }: { patterns: ApiPattern[]; onPick: (p: 
                       {PLATFORM_AR[p.platform] ?? p.platform}
                     </span>
                   )}
+                  {mixed && <span className="text-[9px] font-bold text-amber-800 font-arabic shrink-0 px-1.5 rounded-full bg-amber-50 border border-amber-200">غير ثابت</span>}
                 </span>
                 {/* RTL: the right half is "less than usual", the left half "more" - growth follows the reading direction. */}
-                <span className="grid grid-cols-2 items-center h-5">
+                <span className={`grid grid-cols-2 items-center h-5 ${mixed ? 'opacity-40' : ''}`}>
                   <span className="flex justify-end items-center gap-1 h-full border-l border-slate-400">
                     {value < 0 && <>{valueEl}<span className="block h-3.5 rounded-r" style={{ width, backgroundColor: color }} /></>}
                   </span>
@@ -273,12 +330,17 @@ function EffectBars({ patterns, onPick }: { patterns: ApiPattern[]; onPick: (p: 
               </button>
               <div className="pointer-events-none absolute z-20 hidden group-hover:block group-focus-within:block top-full right-1/4 mt-1 w-80 bg-white border border-slate-200 rounded-xl shadow-md p-2.5 font-arabic">
                 <p className="text-[11px] text-slate-700 leading-relaxed">{p.pattern}</p>
-                <p className="text-[10px] text-slate-400 mt-1">{[sampleLabel(p), reliability(p).label].filter(Boolean).join(' · ')} · اضغط لعرض البطاقة</p>
+                <p className="text-[10px] text-slate-400 mt-1">{[sampleLabel(p), consistencyOf(p)?.label, reliability(p).label].filter(Boolean).join(' · ')} · اضغط لعرض البطاقة</p>
               </div>
             </li>
           );
         })}
       </ul>
+      {showAll && rows.length > 2 * BARS_EACH_END && (
+        <button onClick={() => setShowAll(false)} className="mt-1 text-[11px] font-bold text-sky-700 hover:underline font-arabic cursor-pointer">
+          عرض الأقوى فقط
+        </button>
+      )}
     </div>
   );
 }
@@ -321,6 +383,140 @@ function ShareDonut({ title, patterns }: { title: string; patterns: ApiPattern[]
   );
 }
 
+// ── "What is the usual post?" ─────────────────────────────────────────────
+
+// Two accounts on one platform whose usual posts differ the most - the worked example for the explainer.
+function explainerExample(patterns: ApiPattern[]) {
+  const usual = new Map<string, { name: string; platform: string; usual: number }>();
+  for (const p of patterns) {
+    for (const e of p.account_examples ?? []) usual.set(`${e.platform}|${e.name_ar}`, { name: e.name_ar, platform: e.platform, usual: e.usual });
+  }
+  for (const platform of ['x', 'youtube', 'instagram']) {
+    const accounts = [...usual.values()].filter((a) => a.platform === platform && a.usual > 0).sort((a, b) => b.usual - a.usual);
+    if (accounts.length < 2) continue;
+    const big = accounts[0], small = accounts[accounts.length - 1];
+    if (big.usual < small.usual * 2) continue;
+    // A post count between the two, rounded to two significant digits so it reads like a real number.
+    const raw = Math.sqrt(big.usual * small.usual);
+    const mag = 10 ** Math.max(0, Math.floor(Math.log10(raw)) - 1);
+    const mid = Math.round(raw / mag) * mag;
+    return { platform, big, small, mid };
+  }
+  return null;
+}
+
+function UsualExplainer({ patterns }: { patterns: ApiPattern[] }) {
+  const ex = explainerExample(patterns);
+  const unit = ex ? UNIT_AR[ex.platform] : '';
+  const pct = (v: number, base: number) => signedPct(Math.round((v / base - 1) * 100));
+  const steps = [
+    {
+      title: 'لكل حساب «منشور معتاد»',
+      body: 'رتّب منشورات الحساب من الأقل وصولاً إلى الأكثر: المنشور الذي يقع في المنتصف هو المعتاد. نصف منشورات الحساب تحصل على أكثر منه، ونصفها على أقل.',
+      example: ex && `على ${PLATFORM_AR[ex.platform]}: المنشور المعتاد لـ${ex.big.name} يحصل على ${fmtCount(ex.big.usual)} ${unit}، ولـ${ex.small.name} على ${fmtCount(ex.small.usual)}.`,
+    },
+    {
+      title: 'لماذا لا نقارن الأرقام مباشرة؟',
+      body: 'لأن الحسابات تختلف في حجم جمهورها. لو قارنّا الأرقام كما هي لفاز كل ما ينشره الحساب الكبير لمجرد حجمه، ولما عرفنا ما الذي نجح فعلاً.',
+      example: ex && `منشور يحصل على ${fmtCount(ex.mid)} ${unit} هو نجاح لـ${ex.small.name} (${pct(ex.mid, ex.small.usual)} عن معتادها)، لكنه تراجع لـ${ex.big.name} (${pct(ex.mid, ex.big.usual)}).`,
+    },
+    {
+      title: 'لماذا المنتصف وليس المتوسط؟',
+      body: 'منشور واحد ينتشر بشكل استثنائي يرفع المتوسط كثيراً، فيبدو كل ما سواه «أقل من المتوسط». المنتصف لا يتأثر بذلك، فيعبّر عن المنشور العادي فعلاً.',
+      example: null,
+    },
+  ];
+  return (
+    <div className="mb-5 rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Info className="w-4 h-4 text-sky-600" aria-hidden />
+        <p className="text-xs font-black text-slate-900 font-arabic">ما هو «المنشور المعتاد» ولماذا نقارن به؟</p>
+      </div>
+      <ol className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {steps.map((st, i) => (
+          <li key={st.title} className="bg-white rounded-xl border border-sky-100 p-3">
+            <p className="text-[11px] font-black text-slate-800 font-arabic mb-1">
+              <span className="inline-flex w-4 h-4 items-center justify-center rounded-full bg-sky-600 text-white text-[9px] ml-1">{i + 1}</span>
+              {st.title}
+            </p>
+            <p className="text-[11px] text-slate-600 font-arabic leading-relaxed">{st.body}</p>
+            {st.example && <p className="text-[11px] text-sky-800 font-arabic leading-relaxed mt-1.5 font-bold">مثال من بياناتكم: {st.example}</p>}
+          </li>
+        ))}
+      </ol>
+      <p className="text-[11px] text-slate-700 font-arabic leading-relaxed mt-3">
+        <strong>إذن:</strong> <strong className="text-emerald-700" dir="ltr">+30%</strong> في أي نتيجة تعني أن هذه المنشورات تحصل عادةً على أكثر من معتاد حسابها بـ 30%،
+        و<strong className="text-rose-600" dir="ltr">−26%</strong> تعني أقل بـ 26%. نقيس الوصول بالمشاهدات على يوتيوب، ومرات الظهور على إكس، والإعجابات والتعليقات على إنستغرام.
+      </p>
+    </div>
+  );
+}
+
+// ── Takeaways: the few findings worth acting on ───────────────────────────
+
+// Stable across accounts (or one account with plenty of posts), clearly significant, big enough to matter;
+// at most two per decision type so the list isn't five versions of one finding.
+function pickTakeaways(patterns: ApiPattern[]): ApiPattern[] {
+  const solid = patterns.filter((p) => {
+    const c = consistencyOf(p);
+    return isCompared(p) && p.dimension !== 'platform_content_real' && (p.q_value ?? 1) < 0.05
+      && Math.abs(ratioOf(p) - 1) >= 0.2
+      && (c?.kind === 'consistent' || (c?.kind === 'single' && (p.sample_size ?? 0) >= 30));
+  });
+  const score = (p: ApiPattern) => (consistencyOf(p)?.kind === 'consistent' ? 10 : 0) + Math.abs(Math.log(ratioOf(p)));
+  const perCategory = new Map<string, number>();
+  const out: ApiPattern[] = [];
+  for (const p of solid.sort((a, b) => score(b) - score(a))) {
+    const k = categoryOf(p)?.key ?? '';
+    if ((perCategory.get(k) ?? 0) >= 2) continue;
+    perCategory.set(k, (perCategory.get(k) ?? 0) + 1);
+    out.push(p);
+    if (out.length === 5) break;
+  }
+  return out;
+}
+
+function Takeaways({ patterns, onPick }: { patterns: ApiPattern[]; onPick: (p: ApiPattern) => void }) {
+  const picks = pickTakeaways(patterns);
+  if (picks.length === 0) return null;
+  return (
+    <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
+      <p className="text-sm font-black text-slate-900 font-arabic">الخلاصة: أنماط ثابتة يمكن البناء عليها</p>
+      <p className="text-[11px] text-slate-500 font-arabic mb-3">
+        تتكرر في معظم الحسابات (أو في حساب واحد بعدد منشورات كبير)، ولا تُفسَّر بالصدفة. اضغط على أي نمط لعرض بطاقته.
+      </p>
+      <ol className="space-y-2">
+        {picks.map((p, i) => {
+          const up = isUp(p);
+          const ex = p.account_examples?.[0];
+          const unit = p.platform ? UNIT_AR[p.platform] ?? '' : '';
+          return (
+            <li key={p.pattern_id}>
+              <button onClick={() => onPick(p)} className="w-full flex items-start gap-3 p-2.5 rounded-xl bg-white border border-emerald-100 hover:border-emerald-300 text-right cursor-pointer transition-colors">
+                <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-700 text-white text-[11px] font-black flex items-center justify-center">{i + 1}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="text-xs font-black text-slate-900 font-arabic">
+                      {labelOf(p)}{p.platform ? ` على ${PLATFORM_AR[p.platform] ?? p.platform}` : ''}
+                    </span>
+                    <span className="text-xs font-black font-arabic" style={{ color: up ? UP : DOWN }}>
+                      {up ? 'أعلى' : 'أقل'} من المعتاد <span dir="ltr">{headline(p)}</span>
+                    </span>
+                  </span>
+                  <span className="block text-[11px] text-slate-500 font-arabic mt-0.5">
+                    {consistencyOf(p)?.label}
+                    {ex && ` · مثال: ${ex.name_ar} معتادها ${fmtCount(ex.usual)} ${unit}، وهذه المنشورات ${fmtCount(ex.typical)}`}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 // ── Card ──────────────────────────────────────────────────────────────────
 
 function PatternCard({ p, copied, highlighted, onCopy }: { p: ApiPattern; copied: boolean; highlighted: boolean; onCopy: () => void }) {
@@ -329,9 +525,13 @@ function PatternCard({ p, copied, highlighted, onCopy }: { p: ApiPattern; copied
   const tone = up ? UP : DOWN;
   const rel = reliability(p);
   const sample = sampleLabel(p);
-  const action = cat && ACTION[cat.key] ? ACTION[cat.key]![up ? 'up' : 'down'] : null;
-  const r = ratioOf(p);
-  const maxBar = Math.max(1, r);
+  const mixed = consistencyOf(p)?.kind === 'mixed';
+  const action = mixed
+    ? 'لا تعمّم هذه النتيجة: راجع جدول الحسابات وطبّقها فقط على الحسابات التي تظهر فيها.'
+    : cat && ACTION[cat.key] ? ACTION[cat.key]![up ? 'up' : 'down'] : null;
+  const consistency = consistencyOf(p);
+  const examples = (p.account_examples ?? []).slice(0, 4);
+  const unit = p.platform ? UNIT_AR[p.platform] ?? 'تفاعل' : 'تفاعل';
   return (
     <article
       id={`pattern-${p.pattern_id}`}
@@ -367,23 +567,34 @@ function PatternCard({ p, copied, highlighted, onCopy }: { p: ApiPattern; copied
 
       <p className="text-xs text-slate-700 font-arabic leading-relaxed mt-3">{p.pattern}</p>
 
-      {isCompared(p) && (
-        <div className="mt-3 space-y-1.5">
-          {[
-            { label: 'هذه المنشورات', value: r, color: tone },
-            { label: 'المنشور المعتاد', value: 1, color: '#94a3b8' },
-          ].map((b) => (
-            <div key={b.label} className="flex items-center gap-2">
-              <span className="text-[10px] text-slate-500 font-arabic w-24 shrink-0">{b.label}</span>
-              <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${(b.value / maxBar) * 100}%`, backgroundColor: b.color }} />
-              </div>
-              <span className="text-[10px] font-bold text-slate-600 w-8 text-left" dir="ltr">{Math.round(b.value * 100)}</span>
-            </div>
-          ))}
-          <p className="text-[10px] text-slate-400 font-arabic">
-            {p.metric_ar ? `المقياس: ${p.metric_ar}` : 'المقياس: الأداء'} · المنشور المعتاد = 100
+      {examples.length > 0 && (
+        <div className="mt-3 rounded-xl border border-slate-100 overflow-hidden">
+          <p className="px-2.5 py-1.5 text-[10px] font-bold text-slate-500 font-arabic bg-slate-50 border-b border-slate-100">
+            بأرقام الحساب نفسه ({unit}) · المعتاد = المنشور الذي في منتصف منشورات الحساب
           </p>
+          <table className="w-full text-[11px] font-arabic">
+            <thead>
+              <tr className="text-[10px] text-slate-400">
+                <th className="text-right font-bold px-2.5 py-1">الحساب</th>
+                <th className="text-left font-bold px-1 py-1">معتاد الحساب</th>
+                <th className="text-left font-bold px-1 py-1">هذه المنشورات</th>
+                <th className="text-left font-bold px-2.5 py-1">الفرق</th>
+              </tr>
+            </thead>
+            <tbody>
+              {examples.map((e) => {
+                const diff = Math.round((e.ratio - 1) * 100);
+                return (
+                  <tr key={`${e.platform}-${e.name_ar}`} className="border-t border-slate-50">
+                    <td className="px-2.5 py-1 font-bold text-slate-700 truncate max-w-[9rem]" title={`${e.name_ar} · ${e.posts} منشوراً في هذه الفئة`}>{e.name_ar}</td>
+                    <td className="px-1 py-1 text-left text-slate-500" dir="ltr">{fmtCount(e.usual)}</td>
+                    <td className="px-1 py-1 text-left font-bold text-slate-800" dir="ltr">{fmtCount(e.typical)}</td>
+                    <td className="px-2.5 py-1 text-left font-black" dir="ltr" style={{ color: diff >= 0 ? UP : DOWN }}>{signedPct(diff)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -393,6 +604,11 @@ function PatternCard({ p, copied, highlighted, onCopy }: { p: ApiPattern; copied
             p.dimension === 'awj_sada_real' ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-slate-600 bg-slate-50 border-slate-200'
           }`}>
             {sample}
+          </span>
+        )}
+        {consistency && (
+          <span title={consistency.hint} className={`text-[10px] font-bold px-2 py-0.5 rounded-full font-arabic border ${CONSISTENCY_CLASS[consistency.kind]}`}>
+            {consistency.label}
           </span>
         )}
         <span
@@ -604,17 +820,6 @@ export default function PatternStore({ onNotify }: {
         </button>
       </div>
 
-      {/* How to read */}
-      <div className="flex items-start gap-2 p-3 mb-4 rounded-xl bg-sky-50/60 border border-sky-100">
-        <Info className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" aria-hidden />
-        <p className="text-[11px] text-slate-700 font-arabic leading-relaxed">
-          <strong>كيف تقرأ الأرقام؟</strong> نقارن كل منشور بالمنشور المعتاد <em className="not-italic font-bold">لحسابه</em>، حتى لا يتفوق الحساب الكبير لمجرد حجمه.
-          {' '}<strong className="text-emerald-700" dir="ltr">+30%</strong> تعني أن هذه المنشورات تحصل عادةً على أكثر من المعتاد بـ 30%،
-          {' '}و<strong className="text-rose-600" dir="ltr">−26%</strong> تعني أقل بـ 26%.
-          {' '}المقياس: المشاهدات على يوتيوب، ومرات الظهور على إكس، والإعجابات والتعليقات على إنستغرام.
-        </p>
-      </div>
-
       {isLoading ? (
         <Skeleton />
       ) : loadError ? (
@@ -686,6 +891,9 @@ export default function PatternStore({ onNotify }: {
             )}
           </div>
 
+          <UsualExplainer patterns={real} />
+          {!filtered && <Takeaways patterns={real} onPick={jumpTo} />}
+
           {shown.length === 0 ? (
             <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl">
               <p className="text-sm text-slate-600 font-arabic mb-2">لا توجد نتائج تطابق هذه الفلاتر.</p>
@@ -714,7 +922,7 @@ export default function PatternStore({ onNotify }: {
                 <div className="lg:col-span-2 p-4 rounded-2xl border border-slate-200/80">
                   <p className="text-xs font-bold text-slate-800 font-arabic">{activeCat ? activeCat.question : 'كم تبعد كل نتيجة عن المنشور المعتاد؟'}</p>
                   <p className="text-[10px] text-slate-400 font-arabic mb-3">
-                    الخط الأوسط = المنشور المعتاد للحساب · مرّر الفأرة على أي سطر لقراءة النتيجة، واضغط لفتح بطاقتها
+                    الخط الأوسط = المنشور المعتاد للحساب · الأشرطة الباهتة نتائج غير ثابتة بين الحسابات · اضغط على أي سطر لفتح بطاقته
                   </p>
                   <EffectBars patterns={shown} onPick={jumpTo} />
                 </div>

@@ -261,6 +261,42 @@ def _ratio_phrase(ratio: float, noun: str = "أداءً") -> str:
     return f"{phrase} (أي {ratio:.1f}×)" if ratio >= 1.95 else phrase
 
 
+MIN_ACCOUNT_POSTS = 5  # an account needs this many posts in a slice to count as an example of it
+
+
+def _account_usuals(records: list[dict[str, Any]]) -> dict[tuple[str, str], float]:
+    """Each account's typical post in raw numbers (median views/impressions/interactions) per platform."""
+    groups: dict[tuple[str, str], list[float]] = {}
+    for r in records:
+        if r.get("primary_value") is not None and r.get("entity_key"):
+            groups.setdefault((r["platform"], r["entity_key"]), []).append(r["primary_value"])
+    return {k: statistics.median(v) for k, v in groups.items()}
+
+
+def _account_examples(bucket, value, usual, ratio: float) -> tuple[list[dict[str, Any]], int]:
+    """The slice in each account's own raw numbers, so "عادةً أقل بـ 26%" becomes "4,200 → 3,100 مرة ظهور".
+
+    `typical` is the account's usual post scaled by the slice's median index in that account
+    (for content types this is exactly the slice's median raw value). Returns the examples
+    (most posts first) and how many of them point the same way as the overall finding.
+    """
+    by_account: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for r in bucket:
+        by_account.setdefault((r["platform"], r.get("entity_key", "")), []).append(r)
+    examples = []
+    for key, rows in by_account.items():
+        if len(rows) < MIN_ACCOUNT_POSTS or key not in usual:
+            continue
+        idx = statistics.median(value(r) for r in rows)
+        examples.append({
+            "name_ar": rows[0].get("channel_name_ar") or key[1], "platform": key[0], "posts": len(rows),
+            "usual": round(usual[key]), "typical": round(usual[key] * idx), "ratio": round(idx, 3),
+        })
+    examples.sort(key=lambda e: -e["posts"])
+    agree = sum(1 for e in examples if (e["ratio"] > 1) == (ratio > 1))
+    return examples, agree
+
+
 def _real_candidates(records, dimension, key_fn, index_key, describe_fn, label_fn) -> list[dict[str, Any]]:
     """`label_fn(key)` -> (short title, platform or None, metric title) - what the dashboard shows as the card heading."""
     # Every slice with enough posts on both sides, with its effect and raw p-value (not yet filtered).
@@ -271,6 +307,7 @@ def _real_candidates(records, dimension, key_fn, index_key, describe_fn, label_f
     def value(r: dict[str, Any]) -> float:
         return max(r.get(index_key, r["performance_index"]), INDEX_FLOOR)
 
+    usual = _account_usuals(records)
     out = []
     for key, bucket in buckets.items():
         rest = [r for r in records if key_fn(r) != key]
@@ -282,10 +319,12 @@ def _real_candidates(records, dimension, key_fn, index_key, describe_fn, label_f
             continue
         t_stat = _welch_t_stat(a, b)
         med_a, med_b = statistics.median(value(r) for r in bucket), statistics.median(value(r) for r in rest)
+        examples, agree = _account_examples(bucket, value, usual, med_a / med_b)
         out.append({
             "dimension": dimension, "key": key, "n": len(bucket), "n_rest": len(rest), "t": t_stat,
             "p": _p_value(t_stat, a, b) if t_stat else 1.0, "ratio": med_a / med_b, "med_a": med_a, "med_b": med_b,
             "types": sorted({r["content_type"] for r in bucket}), "describe": describe_fn, "label": label_fn(key),
+            "examples": examples, "agree": agree,
         })
     return out
 
@@ -323,6 +362,9 @@ def _finalize(candidates: list[tuple[str, dict[str, Any]]]) -> list[dict[str, An
             "platform": c["label"][1],
             "metric_ar": c["label"][2],
             "n_rest": c["n_rest"],
+            "account_examples": c["examples"][:5],
+            "accounts_agree": c["agree"],
+            "accounts_total": len(c["examples"]),
         })
     return patterns
 

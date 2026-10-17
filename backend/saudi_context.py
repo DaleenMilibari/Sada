@@ -43,7 +43,12 @@ _VOICE_DEFAULT = "استخدم فصحى إعلامية سعودية سهلة، �
 
 
 def writing_voice(tone: str | None = None) -> str:
-    return _VOICE_BASE + _VOICE_BY_TONE.get((tone or "").strip(), _VOICE_DEFAULT)
+    tone = (tone or "").strip()
+    if tone and tone not in _VOICE_BY_TONE:
+        # A custom one-word tone typed by the user (OptimizerView "أخرى").
+        word = tone.split()[0][:20]
+        return _VOICE_BASE + f"النبرة المطلوبة: «{word}» - اكتب بهذه النبرة. " + _VOICE_DEFAULT
+    return _VOICE_BASE + _VOICE_BY_TONE.get(tone, _VOICE_DEFAULT)
 
 
 def upcoming_occasions(today: date, window_days: int = OCCASION_WINDOW_DAYS) -> list[tuple[str, int]]:
