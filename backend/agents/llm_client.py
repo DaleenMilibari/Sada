@@ -76,8 +76,13 @@ def _client_for(key: str):
             from google import genai
             from google.genai import types
 
+            # attempts=1: the SDK's own retries would stretch one call past DEADLINE_S;
+            # generate_json() does the retrying (other key/model) itself.
             _clients[key] = genai.Client(
-                api_key=key, http_options=types.HttpOptions(timeout=int(REQUEST_TIMEOUT_S * 1000))
+                api_key=key,
+                http_options=types.HttpOptions(
+                    timeout=int(REQUEST_TIMEOUT_S * 1000), retry_options=types.HttpRetryOptions(attempts=1)
+                ),
             )
         return _clients[key]
 
