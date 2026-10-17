@@ -534,6 +534,22 @@ def build_video_diagnosis_context(post: dict[str, Any]) -> dict[str, Any]:
         "recommendation": None,
     }]
 
+    from backend.agents import root_cause
+
+    rc = root_cause.analyze(post)
+    drivers = rc["drivers"] if rc and direction != "in_line" else []
+    driver_kinds = {d["kind"] for d in drivers}
+    for d in drivers:
+        factors.insert(len(factors) - 1, {  # before the headline comparison
+            "reason": d["reason"],
+            "supporting_metric": d["metric"],
+            "evidence_source_title": d["evidence"]["title"],
+            "evidence_url_or_ref": d["evidence"]["url"],
+            "confidence": round(min(0.95, base_conf + 0.1), 2),
+            "recommendation": d["decision"],
+            "driver": d["kind"],
+        })
+
     if direction != "in_line":
         # An under-performer is compared with the best peers, an over-performer with the worst.
         group, other = (top, bottom) if direction == "under" else (bottom, top)
@@ -545,7 +561,7 @@ def build_video_diagnosis_context(post: dict[str, Any]) -> dict[str, Any]:
         ref_hour, my_hour = round(statistics.median(hours)), _local_hour(post)
         gap = min(abs(my_hour - ref_hour), 24 - abs(my_hour - ref_hour))
         near = sum(min(abs(h - ref_hour), 24 - abs(h - ref_hour)) <= 2 for h in hours) / len(hours)
-        if len(group) >= 2 and gap >= 3 and near >= 0.4:  # only when the comparison group actually clusters around one hour
+        if len(group) >= 2 and gap >= 3 and near >= 0.4 and "timing" not in driver_kinds:  # clusters around one hour; not already a driver
             factors.append({
                 "reason": f"ساعة النشر ({_clock(my_hour)} بتوقيت الرياض) تختلف عن ساعة نشر المنشورات {word} (حوالي {_clock(ref_hour)}).",
                 "supporting_metric": f"فرق {gap} ساعات؛ {near * 100:.0f}% من {len(group)} منشورات مقارنة نُشرت خلال ±٢ ساعة من {_clock(ref_hour)}",
@@ -570,7 +586,7 @@ def build_video_diagnosis_context(post: dict[str, Any]) -> dict[str, Any]:
                 })
 
         mine = title_features(post["title"])
-        for name, label in _FEATURE_LABELS.items():
+        for name, label in ({} if drivers else _FEATURE_LABELS).items():  # weak cues - only when no root cause was found
             rate = sum(title_features(c["title"])[name] for c in group) / len(group)
             rate_other = sum(title_features(c["title"])[name] for c in other) / len(other)
             if len(group) < 2 or abs(rate - rate_other) < 0.4:
@@ -597,11 +613,19 @@ def build_video_diagnosis_context(post: dict[str, Any]) -> dict[str, Any]:
             if my_er is not None and len(ers) >= MIN_REAL_COMPARABLES:
                 ref_er = statistics.median(ers)
                 if ref_er and abs(my_er / ref_er - 1) >= 0.3:
+                    reach_word = "الظهور" if post["platform"] == "x" else "المشاهدات"
+                    if direction == "under" and my_er > ref_er:
+                        er_reason = (f"من شاهد المنشور تفاعل معه أكثر من المعتاد: المحتوى نفسه لاقى قبولاً، "
+                                     f"فالمشكلة في الوصول (عدد {reach_word}) لا في المحتوى.")
+                    elif direction == "under":
+                        er_reason = "حتى من شاهد المنشور تفاعل معه أقل من المعتاد: المحتوى نفسه لم يجذب الجمهور، لا التوزيع وحده."
+                    else:
+                        er_reason = f"معدل التفاعل (إعجابات + تعليقات ÷ {reach_word}) {'أقل' if my_er < ref_er else 'أعلى'} من وسيط المنشورات المشابهة."
                     factors.append({
-                        "reason": f"معدل التفاعل (إعجابات + تعليقات ÷ مشاهدات) {'أقل' if my_er < ref_er else 'أعلى'} من وسيط المنشورات المشابهة.",
+                        "reason": er_reason,
                         "supporting_metric": f"{my_er * 100:.2f}% مقابل وسيط {ref_er * 100:.2f}% (n={len(ers)})",
-                        "evidence_source_title": closest["title"],
-                        "evidence_url_or_ref": closest["url"],
+                        "evidence_source_title": post["title"],  # the rate is this post's own
+                        "evidence_url_or_ref": post["url"],
                         "confidence": round(base_conf * 0.8, 2),
                         "recommendation": None,
                     })
@@ -610,7 +634,8 @@ def build_video_diagnosis_context(post: dict[str, Any]) -> dict[str, Any]:
     if audience:
         factors.append(audience)
 
-    return {"post": post, "comparable": comparable, "basis": basis, "factors": factors, "direction": direction, "ratio": ratio, "low_confidence": False}
+    return {"post": post, "comparable": comparable, "basis": basis, "factors": factors, "direction": direction, "ratio": ratio,
+            "low_confidence": False, "drivers": drivers, "root_cause": rc}
 
 
 MIN_AUDIENCE_COMMENTS = 5
@@ -678,6 +703,25 @@ def _synthesize_video_via_llm(ctx: dict[str, Any]) -> tuple[str, list[str]]:
     return parsed["diagnosis"], parsed["recommendations"] or _deterministic_synthesis(ctx)[1]
 
 
+def _root_cause_synthesis(ctx: dict[str, Any]) -> tuple[str, list[str]]:
+    post, rc, drivers = ctx["post"], ctx["root_cause"], ctx["drivers"]
+    first = drivers[0]
+    value = _primary_value(post) or 0
+    usual = f"{rc['index']:.2f}× المنشور المعتاد للحساب ({_fmt(value)} مقابل {_fmt(rc['baseline'])} {rc['metric']})"
+    verb = "تراجع" if ctx["direction"] == "under" else "تفوّق"
+    parts = [f"{verb} المنشور إلى {usual}." if ctx["direction"] == "under" else f"{verb} المنشور: {usual}.",
+             f"السبب الأرجح: {first['reason']}"]
+    if len(drivers) > 1:
+        parts.append("وعامل مساعد: " + drivers[1]["reason"])
+    er = next((f["reason"] for f in ctx["factors"] if "فالمشكلة في الوصول" in f["reason"] or "لم يجذب الجمهور" in f["reason"]), None)
+    if er:
+        parts.append(er)
+    recs = [d["decision"] for d in drivers]
+    if er and "فالمشكلة في الوصول" in er:
+        recs.append("لا تغيّر المحتوى نفسه؛ أعد نشره أو انشر مثله مع تطبيق القرار أعلاه.")
+    return " ".join(parts), recs
+
+
 def diagnose_video(video_id: str) -> dict[str, Any] | None:
     """Diagnosis of a collected post, or None if the post doesn't exist."""
     post = repository.get_video(video_id)
@@ -693,8 +737,10 @@ def diagnose_video(video_id: str) -> dict[str, Any] | None:
             "low_confidence": True,
         }
     evidence_hash = _evidence_hash(ctx)
-    cached = _cached_wording(video_id, evidence_hash)
-    if cached:
+    cached = None if ctx.get("drivers") else _cached_wording(video_id, evidence_hash)
+    if ctx.get("drivers"):
+        diagnosis, recs = _root_cause_synthesis(ctx)  # grounded wording; no LLM needed
+    elif cached:
         diagnosis, recs = cached
     else:
         try:
@@ -704,7 +750,7 @@ def diagnose_video(video_id: str) -> dict[str, Any] | None:
             diagnosis, recs = _deterministic_synthesis(ctx)
     if ctx["basis"] == "account":
         diagnosis += " (ملاحظة: المقارنة على مستوى الحساب ونوع المحتوى لقلة المنشورات بنفس الموضوع.)"
-    factors = [{k: v for k, v in f.items() if k != "recommendation"} for f in ctx["factors"]]
+    factors = [{k: v for k, v in f.items() if k not in ("recommendation", "driver")} for f in ctx["factors"]]
     return {"diagnosis": diagnosis, "contributing_factors": factors, "recommendations": recs,
             "low_confidence": False, "from_cache": cached is not None}
 
