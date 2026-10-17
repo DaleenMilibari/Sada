@@ -645,6 +645,7 @@ class DraftSuggestRequest(BaseModel):
     topic: str = Field(max_length=40)
     content_type: str = Field(default="video", max_length=20)
     channel_options: list[str] = Field(default_factory=list, max_length=30)
+    tone: str | None = Field(default=None, max_length=20)  # "تفاعلي" | "رسمي" | "إخباري"
 
 
 class DraftExample(BaseModel):

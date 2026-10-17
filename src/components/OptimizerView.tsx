@@ -174,7 +174,7 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
     try {
       const res = await apiFetch<DraftSuggestion>('/api/draft/suggest', {
         method: 'POST',
-        body: JSON.stringify({ topic, content_type: contentType, channel_options: channelOptions }),
+        body: JSON.stringify({ topic, content_type: contentType, channel_options: channelOptions, tone }),
       });
       setContent(res.text);
       setSuggestion(res);

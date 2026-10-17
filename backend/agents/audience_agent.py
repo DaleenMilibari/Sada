@@ -28,7 +28,7 @@ from typing import Any
 
 from sqlalchemy import bindparam, func, select, update
 
-from backend import db, repository
+from backend import db, repository, saudi_context
 from backend.agents import llm_client
 
 logger = logging.getLogger("sada.audience")
@@ -89,6 +89,7 @@ def classify_pending(limit: int) -> int:
             '  "reaction": تفاعل مع الحدث أو الخبر نفسه وليس مع القناة: دعاء، تعاطف، فرح أو غضب من الحدث، '
             'رأي في الفرق أو التحكيم أو الأطراف. مثال: "الله ينتقم من المعتدين" أو "الحكم ظلم الهلال" = reaction و neutral.\n'
             '  "other": إعلانات، أو كلام لا علاقة له.\n'
+            f"{saudi_context.AUDIENCE_GUIDE}"
             "كل سطر بالشكل: رقم | نص التعليق.\n"
             f"{lines}\n"
             'أعد كائن JSON فقط يربط كل رقم بنتيجته، مثال: {"0": {"s": "positive", "i": "praise"}}'
@@ -407,10 +408,11 @@ def build_themes(days: int = 30, platform: str | None = None) -> dict[str, Any]:
         "أنت محلل جمهور لهيئة الإذاعة والتلفزيون السعودية. هذه طلبات الجمهور وانتقاداته لقنوات الهيئة.\n"
         "كل سطر: رقم | النوع (request طلب / criticism انتقاد) | القناة | النص.\n"
         f"{lines}\n\n"
+        f"{saudi_context.AUDIENCE_GUIDE}"
         "جمّعها في 3 إلى 6 مواضيع واضحة، كل موضوع يجمع تعليقات تقول الشيء نفسه تقريباً. لكل موضوع أعد:\n"
         '- "title": عنوان قصير وواضح بالعربية (أقل من 8 كلمات)\n'
         '- "kind": "request" أو "criticism"\n'
-        '- "recommendation": توصية عملية واحدة لفريق المحتوى في الهيئة (جملة واحدة تبدأ بفعل)\n'
+        '- "recommendation": توصية عملية واحدة لفريق المحتوى في الهيئة (جملة واحدة تبدأ بفعل، بفصحى إعلامية سعودية)\n'
         f'- "topic": أقرب موضوع من القائمة: {topics}\n'
         '- "members": أرقام التعليقات التي تنتمي لهذا الموضوع فقط\n'
         "لا تخترع مواضيع لا تدعمها التعليقات. تجاهل التعليقات التي لا تنتمي لأي موضوع.\n"

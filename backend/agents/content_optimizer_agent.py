@@ -55,14 +55,16 @@ BASELINE_SCORE = 100.0
 def _generate_variants_via_llm(
     content_type: str, topic: str, original_text: str | None, tone: str | None = None
 ) -> list[str]:
+    from backend import saudi_context
+
     seed = f'النص الأصلي: "{original_text}"' if original_text else "لا يوجد نص أصلي، اقترح من الصفر."
-    if tone:
-        seed = f"استخدم نبرة {tone}. {seed}"
     topic_label = TOPICS.get(topic, topic)
     prompt = (
-        "أنت مساعد صياغة محتوى لمنصة إعلامية عربية اسمها صدى. "
+        "أنت محرر محتوى رقمي في هيئة الإذاعة والتلفزيون السعودية، تكتب لجمهور سعودي. "
         f"اكتب 3 نسخ بديلة (متغيرات) لمنشور من نوع '{content_type}' حول موضوع '{topic_label}'. "
         f"{seed}\n"
+        f"{saudi_context.writing_voice(tone)}\n"
+        f"{saudi_context.local_moment()}\n"
         "أعد النتيجة فقط كمصفوفة JSON من 3 نصوص عربية قصيرة (بدون أي شرح إضافي)، مثال: "
         '["نص 1", "نص 2", "نص 3"]'
     )

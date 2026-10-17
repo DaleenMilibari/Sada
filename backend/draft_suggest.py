@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Any
 
-from backend import repository
+from backend import repository, saudi_context
 from backend.agents import llm_client
 from backend.playbook import CONTENT_TYPE_AR, PLATFORM_AR
 from backend.topics import TOPICS
@@ -40,7 +40,7 @@ def _examples(topic: str, entity_keys: list[str]) -> list[dict[str, Any]]:
     return []
 
 
-def suggest(topic: str, content_type: str, entity_keys: list[str]) -> dict[str, Any]:
+def suggest(topic: str, content_type: str, entity_keys: list[str], tone: str | None = None) -> dict[str, Any]:
     topic_ar = TOPICS.get(topic, topic)
     type_ar = CONTENT_TYPE_AR.get(content_type, content_type)
     examples = _examples(topic, entity_keys)
@@ -64,9 +64,12 @@ def suggest(topic: str, content_type: str, entity_keys: list[str]) -> dict[str, 
         + ". الوصف هو فكرة المنشور التي سيحسّن صياغتها وكيل آخر لاحقاً.\n"
         "هذه أحدث منشورات الهيئة الأعلى أداءً في هذا الموضوع (مقارنة بالمعتاد لكل حساب):\n"
         f"{lines}\n\n"
+        f"{saudi_context.writing_voice(tone)}\n"
+        f"{saudi_context.local_moment()}\n"
         "المطلوب: فكرة منشور جديد يواكب ما يتفاعل معه الجمهور الآن في هذه المنشورات. "
         f"جملة أو جملتان بالعربية، أقل من {MAX_CHARS} حرفاً. لا تنسخ أي منشور حرفياً، "
-        "ولا تخترع أرقاماً أو أسماء أو أحداثاً غير موجودة في المنشورات أعلاه.\n"
+        "ولا تخترع أرقاماً أو أسماء أو أحداثاً غير موجودة في المنشورات أعلاه. "
+        "ابدأ بنص المنشور مباشرة دون مقدمات مثل «فكرة المنشور:».\n"
         'أعد JSON فقط: {"text": "..."}'
     )
     try:

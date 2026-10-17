@@ -301,7 +301,7 @@ def get_analytics_summary(
 @api.post("/draft/suggest", response_model=DraftSuggestion, dependencies=[Depends(limit_llm)])
 def post_draft_suggest(req: DraftSuggestRequest):
     """A first description for a new post, from SBA's best-performing recent posts on the topic."""
-    return draft_suggest.suggest(req.topic, req.content_type, req.channel_options)
+    return draft_suggest.suggest(req.topic, req.content_type, req.channel_options, req.tone)
 
 
 @api.get("/playbook", response_model=Playbook)
