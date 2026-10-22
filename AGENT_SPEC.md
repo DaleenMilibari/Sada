@@ -1,6 +1,6 @@
 # Sada — Agent Specification
 
-Each agent lives in its own file under `backend/agents/` and returns structured JSON (Pydantic models in `backend/schemas.py`). Field names and JSON shapes here are the contract the backend implements.
+Each agent lives in its own file under `backend/agents/` (helpers such as `root_cause.py`, the platform clients and `llm_client.py` sit beside them) and returns structured JSON (Pydantic models in `backend/schemas.py`). Field names and JSON shapes here are the contract the backend implements.
 
 Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, Tools, Data/Context, Reasoning task, Decision, Action/Output, Memory/state, Evidence, Failure/fallback. No agent is a single LLM prompt. Each one visibly chooses between options, uses evidence, and produces a structured decision.
 
@@ -116,45 +116,36 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 
 ---
 
-## 5. Anomaly Detection Agent (spikes & drops)
+## 5. Alerts & Diagnosis Agent
 
-**File:** `backend/agents/anomaly_agent.py`
+**Files:** `backend/agents/alerts_diagnosis_agent.py`, `backend/agents/root_cause.py`
 
-- **Goal:** Flag posts that perform far above or below what is normal for them.
-- **Input:** Posts and snapshots for the last `days` (default 7).
-- **Trigger:** `GET /api/alerts` (cached 60 s).
-- **Available tools:** Peer comparison and snapshot interpolation.
-- **Reasoning task:**
-  - **Level:** the post's main metric vs. peers (same platform + account + content type) **at the same age**. Posts ≥7 days old are compared on current values ("plateau").
-  - **Velocity:** metric per hour between the latest two snapshots vs. the interval before them, to catch a post that suddenly takes off or stalls.
-- **Decision:** `ratio ≥ 3` → spike, `ratio ≤ 0.33` → drop. `≥ 6` or `≤ 0.15` is high severity.
-- **Action/output:** `Alert[]` = `{alert_id, kind, video, metric, observed, expected, ratio, severity, detected_at}`.
-- **Memory/state:** Stateless apart from the cache.
-- **Evidence:** `observed`, `expected` and the ratio.
-- **Failure/fallback:** Fewer than 5 peers, posts younger than 6 h, or a tiny expected value → no alert.
-
----
-
-## 6. Diagnostic & Recommendation Agent
-
-**Files:** `backend/agents/diagnostic_recommendation_agent.py`, `backend/agents/root_cause.py`
-
-- **Goal:** Explain why a post over- or under-performed, in terms of a decision the team controls, grounded in the account's own history and in comparable real posts, and recommend what to do.
-- **Input:** A `video_id` (`POST /api/diagnose/video`). The MVP endpoints `POST /api/diagnose` and `POST /api/diagnose/awj-sada` remain.
-- **Trigger:** Clicking an alert or a post in the Alerts view.
-- **Available tools:** Root-cause analysis on the account's last 60 days; retrieval of comparable posts from the database (same platform + account + topic + content type, ±14 days; widened to account + content type when the topic has too few); the pattern store; the LLM for the narrative.
-- **Reasoning task:**
-  - **Root causes** (`root_cause.py`): check the levers a social team controls. **Burst**: published within 10 min of another post from the same account. **Crowding**: unusually many same-account posts within 3 h. **Timing**: a day/time band where the account usually under-performs. **Format**: a content type that does worse than the account's best type. Each lever's effect is the median account index of posts with the attribute vs. without it, from ≥8 posts per group. A lever counts as a cause only if it costs ≥20% (or pays ≥25%). X posts are only compared once measured ≥3 days after publishing.
-  - **Comparables:** compare the post with similar posts on publish hour, duration, title features (question mark, numbers, emoji, length) and engagement rate, instead of restating the metrics as prose.
-- **Decision:** Which factors best explain the outcome. Root causes come first, ranked by how much they cost or pay, so the first one is "the most likely reason"; each carries a concrete decision and the post that proves it.
-- **Action/output:** `DiagnosisResult` = `{diagnosis, contributing_factors[{reason, supporting_metric, evidence_source_title, evidence_url_or_ref, confidence, recommendation, driver}], recommendations[], low_confidence}`. `driver` is the root-cause kind (`burst`, `crowding`, `timing`, `format`) when the factor is one.
-- **Memory/state:** The LLM wording is saved in the `diagnoses` table with a hash of its evidence, so re-opening an alert costs no model call until the evidence changes.
-- **Evidence:** Every factor links to real comparable posts (`evidence_url_or_ref` = the post's `url`).
-- **Failure/fallback:** No comparables → `low_confidence: true`. Never an invented reason. No Gemini key, a model error or a malformed reply (all three endpoints) → evidence-only wording built from the same factors.
+- **Goal:** Find the posts that perform far above or below what is normal for them, then explain why in terms of a decision the team controls, grounded in the account's own history and in comparable real posts, and recommend what to do.
+- **Input:** Posts and snapshots for the last `days` (default 7) for detection; a `video_id` (`POST /api/diagnose/video`) for the diagnosis. The MVP endpoints `POST /api/diagnose` and `POST /api/diagnose/awj-sada` remain.
+- **Trigger:** `GET /api/alerts` (cached 60 s) when the Alerts view loads; clicking an alert or a post runs the diagnosis.
+- **Available tools:** Peer comparison and snapshot interpolation; root-cause analysis on the account's last 60 days; retrieval of comparable posts from the database (same platform + account + topic + content type, ±14 days; widened to account + content type when the topic has too few); the pattern store; the LLM for the narrative.
+- **Reasoning task:** Two steps, at two costs: detection is pure statistics on every load, the diagnosis runs on click and only it may call the LLM.
+  - **Step 1 – Detect.**
+    - **Level:** the post's main metric vs. peers (same platform + account + content type) **at the same age**. Posts ≥7 days old are compared on current values ("plateau").
+    - **Velocity:** metric per hour between the latest two snapshots vs. the interval before them, to catch a post that suddenly takes off or stalls.
+  - **Step 2 – Diagnose.**
+    - **Root causes** (`root_cause.py`): check the levers a social team controls. **Burst**: published within 10 min of another post from the same account. **Crowding**: unusually many same-account posts within 3 h. **Timing**: a day/time band where the account usually under-performs. **Format**: a content type that does worse than the account's best type. Each lever's effect is the median account index of posts with the attribute vs. without it, from ≥8 posts per group. A lever counts as a cause only if it costs ≥20% (or pays ≥25%). X posts are only compared once measured ≥3 days after publishing.
+    - **Comparables:** compare the post with similar posts on publish hour, duration, title features (question mark, numbers, emoji, length) and engagement rate, instead of restating the metrics as prose.
+- **Decision:**
+  - Which posts are abnormal: `ratio ≥ 3` → spike, `ratio ≤ 0.33` → drop. `≥ 6` or `≤ 0.15` is high severity.
+  - Which factors best explain the outcome. Root causes come first, ranked by how much they cost or pay, so the first one is "the most likely reason"; each carries a concrete decision and the post that proves it.
+- **Action/output:**
+  - `Alert[]` = `{alert_id, kind, video, metric, observed, expected, ratio, severity, detected_at}`.
+  - `DiagnosisResult` = `{diagnosis, contributing_factors[{reason, supporting_metric, evidence_source_title, evidence_url_or_ref, confidence, recommendation, driver}], recommendations[], low_confidence}`. `driver` is the root-cause kind (`burst`, `crowding`, `timing`, `format`) when the factor is one.
+- **Memory/state:** Alerts are cached for 60 s. The LLM wording of a diagnosis is saved in the `diagnoses` table with a hash of its evidence, so re-opening an alert costs no model call until the evidence changes.
+- **Evidence:** Each alert carries `observed`, `expected` and the ratio. Every diagnosis factor links to real comparable posts (`evidence_url_or_ref` = the post's `url`).
+- **Failure/fallback:**
+  - Detection: fewer than 5 peers, posts younger than 6 h, or a tiny expected value → no alert.
+  - Diagnosis: no comparables → `low_confidence: true`. Never an invented reason. No Gemini key, a model error or a malformed reply (all three endpoints) → evidence-only wording built from the same factors.
 
 ---
 
-## 7. Audience Analysis Agent
+## 6. Audience Analysis Agent
 
 **File:** `backend/agents/audience_agent.py`
 
@@ -175,7 +166,7 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 
 ---
 
-## 8. Live Clip Detection Agent
+## 7. Live Clip Detection Agent
 
 **File:** `backend/agents/live_clip_detection_agent.py`
 

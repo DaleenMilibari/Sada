@@ -144,7 +144,7 @@ class OptimizationResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Task 3 — Diagnostic & Recommendation Agent (RAG-grounded)
+# Task 3 — Alerts & Diagnosis Agent, diagnosis step (RAG-grounded)
 # ---------------------------------------------------------------------------
 
 
@@ -198,7 +198,7 @@ class DiagnosisResult(BaseModel):
 
 # Diagnoses grounded in the real AWJ | Sada dataset (backend/data/raw/awj_sada_data.json)
 # rather than a PublishedItemMetrics item matched against the synthetic history -
-# see diagnostic_recommendation_agent.diagnose_awj_topic.
+# see alerts_diagnosis_agent.diagnose_awj_topic.
 class AwjDiagnosisRequest(BaseModel):
     topic: Literal["podcast_reach", "x_relationship"]
 

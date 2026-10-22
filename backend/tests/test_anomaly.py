@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import insert
 
 from backend import config, db
-from backend.agents import anomaly_agent as anomaly
+from backend.agents import alerts_diagnosis_agent as anomaly
 from backend.api import app
 
 NOW = db.utcnow().replace(microsecond=0)

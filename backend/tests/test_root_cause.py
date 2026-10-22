@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import insert
 
 from backend import db
-from backend.agents import diagnostic_recommendation_agent as diag
+from backend.agents import alerts_diagnosis_agent as diag
 from backend.agents import root_cause
 
 BASE = db.utcnow().replace(microsecond=0) - timedelta(days=30)

@@ -21,12 +21,11 @@ from pydantic import BaseModel
 
 from backend import analytics, auth, config, db, draft_suggest, playbook, repository, topics
 from backend.agents import (
+    alerts_diagnosis_agent,
     audience_agent,
     behavior_analysis_agent,
-    anomaly_agent,
     content_optimizer_agent,
     data_collector_agent,
-    diagnostic_recommendation_agent,
     live_clip_detection_agent,
     llm_client,
     trend_prediction_agent,
@@ -197,12 +196,12 @@ def optimize_content(draft: DraftContent):
 
 @api.post("/diagnose", response_model=DiagnosisResult, dependencies=[Depends(limit_llm)])
 def diagnose_item(item: PublishedItemMetrics):
-    return _run_llm_step(diagnostic_recommendation_agent.run, item.model_dump())
+    return _run_llm_step(alerts_diagnosis_agent.run, item.model_dump())
 
 
 @api.post("/diagnose/awj-sada", response_model=DiagnosisResult, dependencies=[Depends(limit_llm)])
 def diagnose_awj_sada(req: AwjDiagnosisRequest):
-    return _run_llm_step(diagnostic_recommendation_agent.diagnose_awj_topic, req.topic)
+    return _run_llm_step(alerts_diagnosis_agent.diagnose_awj_topic, req.topic)
 
 
 MAX_SIGNAL_POINTS = 20_000  # ~55 hours at a 10 s sampling interval
@@ -318,12 +317,12 @@ def get_playbook(days: int = Query(default=60, ge=7, le=365)):
 
 @api.get("/alerts", response_model=list[Alert])
 def get_alerts(days: int = Query(default=7, ge=1, le=60)):
-    return anomaly_agent.alerts(days)
+    return alerts_diagnosis_agent.alerts(days)
 
 
 @api.post("/diagnose/video", response_model=DiagnosisResult, dependencies=[Depends(limit_llm)])
 def diagnose_video(req: VideoDiagnosisRequest):
-    result = diagnostic_recommendation_agent.diagnose_video(req.video_id)
+    result = alerts_diagnosis_agent.diagnose_video(req.video_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Video not found")
     return result

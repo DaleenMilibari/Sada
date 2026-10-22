@@ -117,7 +117,7 @@ audience_comments = Table(
 )
 
 # The LLM wording of a post's diagnosis, kept while the evidence behind it is unchanged
-# (diagnostic_recommendation_agent.diagnose_video): re-opening an alert costs no model call.
+# (alerts_diagnosis_agent.diagnose_video): re-opening an alert costs no model call.
 diagnoses = Table(
     "diagnoses",
     metadata,

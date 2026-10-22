@@ -307,7 +307,7 @@ def test_x_posts_measured_too_young_stay_out_of_analysis(fake):
 
 
 def test_x_diagnosis_refuses_counts_frozen_too_young(fake):
-    from backend.agents import diagnostic_recommendation_agent as diag
+    from backend.agents import alerts_diagnosis_agent as diag
 
     _collect_at(fake, db.utcnow(), [("903", timedelta(hours=2), 50)])
     post = repository.get_video("903")

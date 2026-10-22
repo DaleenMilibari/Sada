@@ -297,7 +297,7 @@ def test_themes_are_validated_against_real_comments(engine, monkeypatch):
 
 
 def test_diagnosis_includes_what_the_posts_audience_said(engine):
-    from backend.agents import diagnostic_recommendation_agent as diag
+    from backend.agents import alerts_diagnosis_agent as diag
 
     add_post(engine, "v1")
     for i in range(3):

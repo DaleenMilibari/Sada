@@ -1,4 +1,4 @@
-from backend.agents import behavior_analysis_agent, diagnostic_recommendation_agent as diag
+from backend.agents import behavior_analysis_agent, alerts_diagnosis_agent as diag
 
 
 def _patterns():
