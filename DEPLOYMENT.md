@@ -132,6 +132,28 @@ python -m backend.agents.data_collector_agent --platform instagram --llm-limit 0
 - Repeat 3.3 steps 4–6 for a new token.
 - To revoke the old one, remove the app in Facebook **Settings → Apps and websites** (then re-add it), or reset the app secret in the app dashboard.
 
+### 3.6 Alternative: live collection through Apify (optional)
+
+If the Meta setup is blocked, `INSTAGRAM_PROVIDER=apify` collects the accounts in `SBA_INSTAGRAM_ACCOUNTS` through Apify's Instagram Scraper (`backend/agents/apify_instagram_client.py`). It reads any public account and needs no Facebook Page.
+
+**Decide as a team before using it:** it is a scraper, so it breaks Instagram's terms of use and can stop working when Instagram changes its pages. Apify bills per result (about $2.70 per 1,000 on the free plan). Meta's official API stays the default.
+
+1. Create an account at **[apify.com](https://apify.com)**, then **Settings → API & integrations** and copy your **personal API token**. Treat it like any other key (section 1) and send it only to the lead.
+2. Put this in `backend/.env`:
+   ```
+   INSTAGRAM_PROVIDER=apify
+   APIFY_API_TOKEN=your-token-here
+   ```
+3. Check one account first. This costs a few cents at most:
+   ```bash
+   python -m backend.agents.apify_instagram_client sbagovsa
+   ```
+4. Then collect: `python -m backend.agents.data_collector_agent --platform instagram --llm-limit 0`
+
+**Spend control.** Each account is fetched at most once per `APIFY_MIN_INTERVAL_MINUTES` (default 360), even though the collector runs every 30 minutes. That throttle lives in memory: the first fetch after every restart or redeploy backfills `COLLECTOR_LOOKBACK_DAYS` again (up to `APIFY_RESULTS_LIMIT_PER_ACCOUNT` posts per account), and later ones re-read `INSTAGRAM_REFRESH_DAYS`. Set a monthly spending limit in Apify Console as a safety net.
+
+Live Apify collection stores posts only, not comments. Comments come from scraper exports: run Apify's Instagram Scraper on its website, download the JSON, and load it with `python -m backend.instagram_import <file>`.
+
 ---
 
 ## 4. What Instagram data we get (and don't)
@@ -283,6 +305,11 @@ See [backend/.env.example](backend/.env.example) for all variables. Key ones:
 | `META_GRAPH_API_VERSION` | `v23.0` | Graph API version |
 | `INSTAGRAM_REFRESH_DAYS` | `7` | Days re-read per run once an account is backfilled |
 | `INSTAGRAM_MAX_PAGES_PER_ACCOUNT` | `10` | Pages of posts read per account per run |
+| `INSTAGRAM_PROVIDER` | `meta` | `meta` (official Graph API) or `apify` (scraper, section 3.6) |
+| `APIFY_API_TOKEN` | empty | Apify token; enables Instagram collection when `INSTAGRAM_PROVIDER=apify` |
+| `APIFY_INSTAGRAM_ACTOR` | `apify~instagram-scraper` | Apify actor that is run |
+| `APIFY_RESULTS_LIMIT_PER_ACCOUNT` | `300` | Max posts per account per Apify fetch |
+| `APIFY_MIN_INTERVAL_MINUTES` | `360` | Each account is fetched at most this often (Apify bills per result) |
 | `X_BEARER_TOKEN` | empty | App-only X API token; enables X collection |
 | `X_TOTAL_POST_BUDGET` | `6000` | Hard cap on X posts read across all runs (≈ $30) |
 | `X_MAX_POSTS_PER_RUN` / `X_MAX_POSTS_PER_ACCOUNT` | `4000` / `600` | Per-run and per-account backfill caps |
