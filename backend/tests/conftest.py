@@ -34,6 +34,13 @@ def _no_real_api_keys(monkeypatch):
     monkeypatch.setattr(config, "INSTAGRAM_ENABLED", False)
     monkeypatch.setattr(config, "X_BEARER_TOKEN", "")
     monkeypatch.setattr(config, "X_ENABLED", False)
+    # LLM keys: llm_client re-reads backend/.env on every call, so stop that too. Tests that
+    # exercise the LLM path fake generate_json or set their own keys (test_llm_client.py).
+    from backend.agents import llm_client
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(llm_client, "_load_env", lambda: None)
     # Budgets a local backend/.env may tune for real collection - tests assume the defaults.
     monkeypatch.setattr(config, "X_REPLY_BUDGET", 1000)
     monkeypatch.setattr(config, "COLLECTOR_LOOKBACK_DAYS", 180)
