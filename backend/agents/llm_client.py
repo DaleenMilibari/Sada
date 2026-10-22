@@ -57,7 +57,7 @@ def _load_env() -> None:
         # load_dotenv() with no path only searches upward from the
         # current working directory, which never finds backend/.env
         # when the server is started from the repo root (as documented
-        # in README.md and backend/README.md) - point it explicitly.
+        # in README.md) - point it explicitly.
         load_dotenv(dotenv_path=_ENV_PATH)
     except ImportError:
         pass

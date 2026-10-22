@@ -152,7 +152,7 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 - **Goal:** Turn public comments (YouTube, Instagram) and replies (X) into an aggregate picture of the audience: sentiment, what people praise, criticize, ask or request, the recurring themes behind requests and criticism, which posts drive discussion, and follower growth per account. Measure how accurate its own labels are.
 - **Input:** `audience_comments` and `follower_snapshots`, joined to posts and channels; `audience_labels` (blind human labels).
 - **Trigger:** The collector run (classification); `GET /api/audience/summary`, `GET /api/audience/themes`, `GET /api/audience/accuracy`; the review queue (`GET /api/audience/review/next`, `POST /api/audience/review`).
-- **Available tools:** The LLM classifies comments in batches of 50, with Saudi dialect cues (praise, criticism, requests, sarcasm, club banter, patriotic prayers) so it doesn't misread them. The LLM also groups request and criticism comments into themes. Everything else is deterministic aggregation.
+- **Available tools:** The LLM classifies comments in batches of 50, with Saudi dialect cues (praise, criticism, requests, sarcasm, club banter, patriotic prayers, regional dialect words, emoji and English slang, spam) so it doesn't misread them. The LLM also groups request and criticism comments into themes. Everything else is deterministic aggregation.
 - **Reasoning task:** Label each comment's sentiment (`positive` / `negative` / `neutral`) and intent (`praise`, `criticism`, `request`, `question`, `reaction` (to the news itself, not to SBA), `other`). Group requests and criticism into themes, each with a topic, the accounts it concerns and a recommendation.
 - **Decision:** Which intents, themes and posts to surface, and whether a sample is large enough to report shares.
 - **Action/output:**
@@ -171,7 +171,7 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 **File:** `backend/agents/live_clip_detection_agent.py`
 
 - **Goal:** Find engagement spikes during a live broadcast and flag them as social-clip opportunities.
-- **Input:** A timestamped engagement signal aligned to broadcast segments. **Currently a simulated signal** (`backend/data/broadcast_mock.json`); there is no live feed.
+- **Input:** A timestamped engagement signal aligned to broadcast segments. **Currently a simulated signal** (`backend/data/broadcast_mock.json`); there is no live feed yet. The planned feed is live-chat messages per minute and concurrent viewers from SBA's YouTube live streams, in the same shape, so neither the agent nor the page changes.
 - **Trigger:** `POST /api/broadcast/detect-clips`, `GET /api/broadcast/signal`, both called by the «لقطات البث المباشر» view (`src/components/LiveClipsView.tsx`), which labels the signal as simulated.
 - **Reasoning task:** Separate a real spike from normal fluctuation using a rolling baseline, and tie it to the segment it happened in.
 - **Action/output:** `ClipOpportunity[]` = `{start_time, end_time, segment_label, spike_magnitude, confidence}`, ranked.
@@ -188,4 +188,4 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 - Missing is never zero: hidden likes, Instagram views and unclassified comments stay `null`.
 - Compare platforms only on `performance_index`.
 - Every LLM call goes through `backend/agents/llm_client.py`: Gemini first, then OpenAI as the fallback when `OPENAI_API_KEY` is set, rotating comma-separated keys and fallback models. Each call has a per-request timeout and an overall deadline (`GEMINI_TIMEOUT_SECONDS`, `GEMINI_DEADLINE_SECONDS`), so no API request hangs on the model.
-- Every prompt that writes for SBA or reads its audience uses `backend/saudi_context.py` (Saudi voice, Riyadh calendar, Saudi dialect cues).
+- Every prompt that writes for SBA or reads its audience uses `backend/saudi_context.py` (Saudi voice, Riyadh and approximate Hijri calendar, Saudi dialect cues).

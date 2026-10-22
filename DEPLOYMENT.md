@@ -252,6 +252,7 @@ The `starter` plan is recommended: the free plan sleeps after inactivity (first 
 - [ ] Dashboard shows real KPIs, the platform switch (YouTube, X, Instagram), trending videos, the accuracy card, the publishing playbook and the pattern cards with per-account numbers; "تحديث" refreshes the patterns.
 - [ ] Optimizer: picking a topic suggests a first draft with the posts it's based on; a draft returns AI-generated variants, a winner, an SBA account and a publish slot.
 - [ ] Alerts (التنبيهات والتشخيص): clicking an alert returns a diagnosis with its most likely root cause and links to real posts.
+- [ ] Live clips (لقطات البث المباشر): the chart and the ranked clip opportunities load, with the "إشارة محاكاة" badge.
 - [ ] Audience (تحليل الجمهور): sentiment, intents, themes, the accuracy card and follower growth load, and Instagram comments appear.
 - [ ] `GET /api/collector/status` shows recent successful runs.
 - [ ] Logout returns to the login screen.
@@ -305,4 +306,5 @@ See [backend/.env.example](backend/.env.example) for all variables. Key ones:
 - **Free Postgres expires after 30 days** (see section 8).
 - **Single instance only**: the collector schedule runs inside the web process, and rate limits and the pattern store are per-instance.
 - **No schema migrations** (tables are created with `create_all`). Changing an existing column needs a manual `ALTER TABLE` or a fresh database + seed import.
+- **Live clips run on a simulated signal.** The «لقطات البث المباشر» page labels it so; the YouTube live feed is not built yet.
 - **Single shared password**, not per-user accounts. Fine for an internal team; move to real accounts before opening to external users.
