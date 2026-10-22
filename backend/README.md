@@ -72,7 +72,7 @@ The shared seed (`sba_youtube_seed.json.gz`) holds the 9 YouTube channels (7,777
 
 ### Instagram scraper exports
 
-`data/dataset_instagram-scraper_*.json` are Apify instagram-scraper exports: `sbagovsa` (16 Oct, 100 posts) and `saudia.sa`, `alekhbariya.tv`, `riyadiyatv`, `sbc_channel` (17 Oct, 100 posts each), with their latest comments.
+`data/dataset_instagram-scraper_*.json` are Apify instagram-scraper exports: `sbagovsa` (16 Oct, 100 posts) and `saudia.sa`, `alekhbariya.tv`, `riyadiyatv`, `sbc_channel` (17 Oct, 100 posts each), with their latest comments. Commenter identity fields (`owner`, `ownerUsername`, `ownerProfilePicUrl`) were stripped from the files; the importer never read them.
 
 ```bash
 python -m backend.instagram_import backend/data/dataset_instagram-scraper_2026-10-17_18-01-36-700.json
