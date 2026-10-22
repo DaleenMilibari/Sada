@@ -29,8 +29,15 @@ powers retrieval for the agent.
 
 ## Setup for any team member
 
+Everything lives in this `rag/` folder and is separate from the Sada backend (its own
+`requirements.txt` and `.env`). Run the commands from inside `rag/`, because the scripts read
+`.env` from the current folder:
+
 ```bash
-pip install chromadb sentence-transformers python-dotenv
+cd rag
+pip install -r requirements.txt
+python load_to_chroma.py all_chunks_merged.json                  # collection 1: podcast_chunks
+python load_social_to_chroma.py ../newData/AWJ_Sada_Data.csv     # collection 2: social_reactions
 ```
 
 Copy `.env.example` to `.env` and fill in a real `CHROMA_API_KEY`
@@ -124,7 +131,7 @@ posts, and show-level audience reviews.
 
 **Honest scope note:** this is *not* a large-scale reaction/sentiment
 dataset. Live scraping of X, Instagram, and TikTok reaction data at volume
-requires paid API access (see `AWJ_Sada_X_Collector.py` for the X API v2
+requires paid API access (see `newData/AWJ_Sada_X_Collector.py` for the X API v2
 full-archive script, which needs a bearer token to run) or extensive manual
 collection — neither was feasible in the hackathon timeframe. What's loaded
 here is a small set of **verified, real** public metrics and posts, each

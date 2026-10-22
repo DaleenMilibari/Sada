@@ -10,6 +10,7 @@ Sada is a multi-agent AI platform for the **Saudi Broadcasting Authority (SBA)**
 | [AGENT_SPEC.md](AGENT_SPEC.md) | Agent specifications and JSON contracts |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Data sources, **how to create every API key**, deploying to Render + Vercel, configuration |
 | [backend/README.md](backend/README.md) | Backend internals, database, datasets, endpoints, tests |
+| [rag/README.md](rag/README.md) | AWJ podcast RAG knowledge base (Chroma Cloud): transcript chunking and loading scripts, separate from the backend |
 
 ---
 

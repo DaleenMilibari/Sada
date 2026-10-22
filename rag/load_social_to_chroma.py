@@ -8,7 +8,7 @@ same embedding model, different content type (audience/engagement data
 rather than transcript text).
 
 Usage:
-    python load_social_to_chroma.py AWJ_Sada_Data.csv
+    python load_social_to_chroma.py ../newData/AWJ_Sada_Data.csv
 
 Requires:
     pip install chromadb sentence-transformers python-dotenv
