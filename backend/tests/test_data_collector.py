@@ -195,6 +195,7 @@ def test_collected_data_served_by_api(fake, monkeypatch):
     from backend.api import app
 
     monkeypatch.setattr(config, "AUTH_ENABLED", False)
+    monkeypatch.setattr(db, "utcnow", lambda: NOW)  # the fake's publish times are relative to NOW, not the real clock
     fake.add_video(4, "match1", timedelta(hours=2), views=9000, title="ملخص مباراة الهلال")
     fake.add_video(4, "clip1", timedelta(hours=1), views=10, duration="PT40S")
     collector.run("cli", client=_client(fake), engine=db.get_engine(), now=db.utcnow(), quota_budget=100, llm_classify_limit=0)
@@ -263,9 +264,10 @@ def test_seed_carries_audience_labels_and_follower_history(engine, fake, tmp_pat
         assert conn.execute(select(func.count()).select_from(db.audience_labels)).scalar() == 1
 
 
-def test_analysis_records_normalize_by_channel_and_age(fake):
+def test_analysis_records_normalize_by_channel_and_age(fake, monkeypatch):
     from backend import repository
 
+    monkeypatch.setattr(db, "utcnow", lambda: NOW)  # the fake's publish times are relative to NOW, not the real clock
     now = db.utcnow()
     fake.add_video(6, "a", timedelta(days=5), views=100)
     fake.add_video(6, "b", timedelta(days=6), views=300)
