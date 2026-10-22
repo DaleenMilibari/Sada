@@ -19,10 +19,26 @@ def test_voice_per_tone_is_saudi():
 def test_occasions_and_weekend():
     assert saudi_context.upcoming_occasions(date(2026, 9, 10)) == [("اليوم الوطني السعودي", 13)]
     assert saudi_context.upcoming_occasions(date(2026, 10, 17)) == []
-    assert saudi_context.upcoming_occasions(date(2026, 12, 20), window_days=70)[0][0] == "يوم التأسيس"  # next year
+    assert ("يوم التأسيس", 64) in saudi_context.upcoming_occasions(date(2026, 12, 20), window_days=70)  # next year
     friday = datetime(2026, 10, 16, 9, 0, tzinfo=timezone.utc)
     assert "الجمعة" in saudi_context.local_moment(friday) and "عطلة نهاية الأسبوع" in saudi_context.local_moment(friday)
+    assert "صلاة الجمعة" in saudi_context.local_moment(friday)
     assert "عطلة" not in saudi_context.local_moment(friday + timedelta(days=3))
+
+
+def test_hijri_calendar_and_seasons():
+    # Known Saudi dates (the arithmetic calendar is within a day of Umm al-Qura).
+    assert saudi_context.to_hijri(date(2026, 2, 18)) == (1447, 9, 1)
+    assert saudi_context.from_hijri(1447, 12, 10) == date(2026, 5, 27)
+    assert "1448هـ" in saudi_context.local_moment(datetime(2026, 10, 22, 9, 0, tzinfo=timezone.utc))
+    # Ramadan 1448 starts around 8 Feb 2027: announced (approximately) ahead, then shapes the timing.
+    before = saudi_context.local_moment(datetime(2027, 1, 30, 9, 0, tzinfo=timezone.utc))
+    assert "شهر رمضان بعد 9 أيام تقريباً" in before
+    during = saudi_context.local_moment(datetime(2027, 3, 3, 9, 0, tzinfo=timezone.utc))
+    assert "نحن في شهر رمضان" in during and "العشر الأواخر" in during and "بعد الإفطار" in during
+    assert "عيد الفطر" in during  # coming up within the window
+    assert "موسم الحج" in saudi_context.local_moment(datetime(2026, 5, 26, 9, 0, tzinfo=timezone.utc))
+    assert saudi_context.current_season(date(2026, 10, 22)) is None
 
 
 def test_audience_classification_gets_dialect_guide(_isolated_database, monkeypatch):
