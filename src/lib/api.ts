@@ -69,7 +69,7 @@ export function describeError(err: unknown): { title: string; desc: string } {
     case 429:
       return { title: 'طلبات كثيرة', desc: 'تم تجاوز الحد المسموح، انتظر دقيقة ثم أعد المحاولة' };
     case 503:
-      return { title: 'خدمة الذكاء الاصطناعي غير مهيأة', desc: 'مفتاح Gemini API غير مضبوط على الخادم' };
+      return { title: 'خدمة الذكاء الاصطناعي غير مهيأة', desc: 'لا يوجد مفتاح Gemini أو OpenAI مضبوط على الخادم' };
     case 502:
       return { title: 'تعذر الحصول على رد من نموذج الذكاء الاصطناعي', desc: 'أعد المحاولة بعد قليل' };
     default:

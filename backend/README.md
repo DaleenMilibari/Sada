@@ -12,7 +12,7 @@ for f in backend/data/dataset_instagram-scraper_*.json; do python -m backend.ins
 uvicorn backend.api:app --reload --port 8000
 ```
 
-`OPENAI_API_KEY` (preferred, with Gemini as fallback) or `GEMINI_API_KEY` is used for draft suggestions, optimizer variants, diagnosis narratives, audience themes, topic refinement and comment classification. All of them go through `agents/llm_client.py`, which rotates comma-separated keys and fallback models. Without a key:
+`GEMINI_API_KEY` (preferred, with `OPENAI_API_KEY` as fallback) is used for draft suggestions, optimizer variants, diagnosis narratives, audience themes, topic refinement and comment classification. All of them go through `agents/llm_client.py`, which rotates comma-separated keys and fallback models. Without a key:
 - the optimizer still works if you pass `variants` in the draft, and the draft suggestion starts from the strongest recent post's title
 - the video diagnosis falls back to evidence-only wording
 - topics stay rule-based, comments stay unclassified and audience themes are not generated

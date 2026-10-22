@@ -138,18 +138,19 @@ def _fake_openai(monkeypatch, log, exhausted):
     )
 
 
-def test_openai_first_then_gemini_fallback(fake, monkeypatch):
+def test_gemini_first_then_openai_fallback(fake, monkeypatch):
     log, exhausted = fake
     monkeypatch.setenv("OPENAI_API_KEY", "o1")
     monkeypatch.setenv("OPENAI_MODEL", "mini")
     monkeypatch.delenv("OPENAI_FALLBACK_MODEL", raising=False)
     _fake_openai(monkeypatch, log, exhausted)
 
-    assert llm_client.get_model() == "mini"
-    assert llm_client.generate_json("p") == '{"by": "o1/mini"}'
+    assert llm_client.get_model() == "flash"
+    assert llm_client.generate_json("p") == '{"by": "k1/flash"}'
+    assert ("o1", "mini") not in log  # OpenAI is not called while Gemini answers
 
-    exhausted.add(("o1", "mini"))
-    assert llm_client.generate_json("p") == '{"by": "k1/flash"}'  # OpenAI out of quota: Gemini takes over
+    exhausted.update({("k1", "flash"), ("k2", "flash"), ("k1", "lite"), ("k2", "lite")})
+    assert llm_client.generate_json("p") == '{"by": "o1/mini"}'  # every Gemini key/model out: OpenAI takes over
 
 
 def test_openai_only_without_gemini_key(monkeypatch):
@@ -160,4 +161,5 @@ def test_openai_only_without_gemini_key(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "o1")
     monkeypatch.setenv("OPENAI_MODEL", "mini")
     _fake_openai(monkeypatch, log, exhausted)
+    assert llm_client.get_model() == "mini"
     assert llm_client.generate_json("p") == '{"by": "o1/mini"}'

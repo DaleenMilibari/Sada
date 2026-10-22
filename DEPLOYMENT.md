@@ -25,7 +25,7 @@ All data feeds one database through the **Data Collector agent** (`backend/agent
 | Key | Who creates it | Where it goes |
 |---|---|---|
 | `GEMINI_API_KEY` | **Everyone**, their own | own `backend/.env`; the lead's also goes on Render |
-| `OPENAI_API_KEY` (optional) | **Lead only** | lead's `backend/.env` + Render. When set, it is used first and Gemini becomes the fallback |
+| `OPENAI_API_KEY` (optional) | **Lead only** | lead's `backend/.env` + Render. When set, it is the fallback once every Gemini key/model is out of quota |
 | `YOUTUBE_API_KEY` | **Lead only** (already done) | lead's `backend/.env` + Render |
 | `META_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ACCOUNT_ID` | **One teammate** | sent privately to the lead → Render |
 | `X_BEARER_TOKEN` | **Lead only** | lead's `backend/.env` + Render |
@@ -44,7 +44,7 @@ Needed locally for draft suggestions, the Optimizer, Diagnosis wording, audience
    ```
 4. Restart the backend. The Optimizer should now return generated variants instead of a "not configured" message.
 
-`GEMINI_API_KEY` (and `OPENAI_API_KEY`) may hold several comma-separated keys. When a key runs out of quota, the next one is tried, then each `GEMINI_FALLBACK_MODEL`. If `OPENAI_API_KEY` is set, OpenAI (`OPENAI_MODEL`, default `gpt-5-mini`) is tried first and Gemini only as the fallback.
+`GEMINI_API_KEY` (and `OPENAI_API_KEY`) may hold several comma-separated keys. When a key runs out of quota, the next one is tried, then each `GEMINI_FALLBACK_MODEL`. If `OPENAI_API_KEY` is set, OpenAI (`OPENAI_MODEL`, default `gpt-5-mini`) is tried only after every Gemini key/model is unavailable.
 
 **If it leaks:** delete it in AI Studio → API keys, then create a new one.
 
@@ -205,7 +205,7 @@ Deploy the **backend first**: the frontend needs its URL at build time.
 2. Render dashboard → **New → Blueprint** → select the repo. Render reads `render.yaml` and creates **both** the `sada-db` Postgres and the `sada-api` web service; `DATABASE_URL` is wired automatically.
 3. When prompted, fill the secret env vars:
    - `GEMINI_API_KEY` — Google AI Studio key (comma-separate several to rotate on quota).
-   - `OPENAI_API_KEY` — optional; when set, OpenAI is used first and Gemini becomes the fallback.
+   - `OPENAI_API_KEY` — optional; when set, OpenAI is the fallback after Gemini.
    - `YOUTUBE_API_KEY` — Google Cloud key with "YouTube Data API v3" enabled (restrict it to that API).
    - `META_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ACCOUNT_ID` — from the Instagram setup (section 3). Leave them empty to collect YouTube only; you can add them later and redeploy.
    - `X_BEARER_TOKEN` — app-only X token (section 5). Leave it empty to skip X; X alone is enough to start the collector.

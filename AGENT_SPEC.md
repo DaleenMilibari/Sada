@@ -19,7 +19,7 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
   - YouTube Data API v3: `channels.list`, `playlistItems.list`, `videos.list`, `commentThreads.list`, 1 quota unit each.
   - Instagram Graph API Business Discovery: public profile and posts of business accounts, about 200 calls/hour.
   - X API v2 (pay-per-use, ≈$0.005 per post or reply read).
-  - The LLM (OpenAI, or Gemini as fallback, via `llm_client.py`), for topic classification.
+  - The LLM (Gemini, or OpenAI as fallback, via `llm_client.py`), for topic classification.
 - **Data/context:** Tables `channels`, `videos`, `video_snapshots`, `audience_comments`, `follower_snapshots`, `collector_runs` (Postgres in production, SQLite locally).
 - **Reasoning task:** Spend a fixed quota and money budget where it matters most.
 - **Decision:**
@@ -196,5 +196,5 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 - Every recommendation or diagnosis traces back to a specific number, sample size or real post.
 - Missing is never zero: hidden likes, Instagram views and unclassified comments stay `null`.
 - Compare platforms only on `performance_index`.
-- Every LLM call goes through `backend/agents/llm_client.py`: OpenAI first when `OPENAI_API_KEY` is set, Gemini otherwise or as fallback, rotating comma-separated keys and fallback models. Each call has a per-request timeout and an overall deadline (`GEMINI_TIMEOUT_SECONDS`, `GEMINI_DEADLINE_SECONDS`), so no API request hangs on the model.
+- Every LLM call goes through `backend/agents/llm_client.py`: Gemini first, then OpenAI as the fallback when `OPENAI_API_KEY` is set, rotating comma-separated keys and fallback models. Each call has a per-request timeout and an overall deadline (`GEMINI_TIMEOUT_SECONDS`, `GEMINI_DEADLINE_SECONDS`), so no API request hangs on the model.
 - Every prompt that writes for SBA or reads its audience uses `backend/saudi_context.py` (Saudi voice, Riyadh calendar, Saudi dialect cues).

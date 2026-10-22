@@ -47,7 +47,7 @@ The dashboard and the pattern store show **real data only**. The old synthetic s
 ## 🛠️ Tech Stack
 
 * **Frontend:** React (TypeScript) + Vite, Tailwind CSS, Recharts, Lucide icons. RTL, light "enterprise" theme with royal-green accents
-* **Backend:** FastAPI (Python 3.11), OpenAI (when `OPENAI_API_KEY` is set) with Google Gemini as fallback, YouTube Data API v3, Instagram Graph API, X API v2
+* **Backend:** FastAPI (Python 3.11), Google Gemini, with OpenAI as fallback (when `OPENAI_API_KEY` is set), YouTube Data API v3, Instagram Graph API, X API v2
 * **Database:** PostgreSQL in production, SQLite locally (SQLAlchemy)
 * **Security:** team-password login with signed tokens, per-IP rate limiting
 * **Hosting:** Vercel (frontend) + Render (API + Postgres). CI on GitHub Actions

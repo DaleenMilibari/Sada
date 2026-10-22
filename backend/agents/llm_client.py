@@ -4,8 +4,9 @@ Kept out of behavior_analysis_agent.py and live_clip_detection_agent.py
 deliberately - those two are pure statistics over the seeded data and
 never need an API key.
 
-When OPENAI_API_KEY is set, OPENAI_MODEL (then each OPENAI_FALLBACK_MODEL) is tried
-first and Gemini is only the fallback; without it, Gemini alone serves every request.
+Gemini is tried first; when OPENAI_API_KEY is set, OPENAI_MODEL (then each
+OPENAI_FALLBACK_MODEL) is the fallback once every Gemini key/model is unavailable.
+With only one provider's key set, that provider alone serves every request.
 
 GEMINI_API_KEY (and OPENAI_API_KEY) may hold several comma-separated keys. When a key hits its quota
 (HTTP 429) - or a model isn't offered to that key's project (HTTP 404, e.g. older
@@ -117,7 +118,7 @@ def _gemini_model() -> str:
 def get_model() -> str:
     """The model that serves requests when nothing is exhausted (recorded next to saved results)."""
     _load_env()
-    if _keys("OPENAI_API_KEY"):
+    if not _keys("GEMINI_API_KEY") and _keys("OPENAI_API_KEY"):
         return os.environ.get("OPENAI_MODEL", "gpt-5-mini")
     return _gemini_model()
 
@@ -139,14 +140,13 @@ def get_models() -> list[str]:
 
 
 def _candidates() -> list[tuple[str, str, str]]:
-    """(provider, model, key) in the order they are tried: OpenAI first when configured, then Gemini."""
+    """(provider, model, key) in the order they are tried: Gemini first, then OpenAI when configured."""
     gemini_keys = get_keys()
     openai_keys = _keys("OPENAI_API_KEY")
-    out = []
+    out = [("gemini", m, k) for m in get_models() for k in gemini_keys]
     if openai_keys:
         models = _model_list(os.environ.get("OPENAI_MODEL", "gpt-5-mini"), os.environ.get("OPENAI_FALLBACK_MODEL", ""))
         out += [("openai", m, k) for m in models for k in openai_keys]
-    out += [("gemini", m, k) for m in get_models() for k in gemini_keys]
     return out
 
 
