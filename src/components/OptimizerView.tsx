@@ -164,11 +164,11 @@ export default function OptimizerView({ onNotify, initialDraft }: OptimizerViewP
         const list = await apiFetch<ChannelOut[]>('/api/channels');
         if (cancelled) return;
         setChannels(list);
-        // A draft from an insight targets its account; otherwise pre-select everything.
-        // Selection is per platform account (channel_id): the same entity has one per platform.
+        // A draft from an insight targets its account; otherwise nothing is pre-selected and the
+        // user picks the accounts. Selection is per platform account (channel_id): the same entity
+        // has one per platform.
         const target = initialDraft?.entityKey;
-        const targeted = list.filter((c) => c.entity_key === target);
-        setSelectedChannels((targeted.length ? targeted : list).map((c) => c.channel_id));
+        setSelectedChannels(list.filter((c) => c.entity_key === target).map((c) => c.channel_id));
       } catch (err) {
         if (!cancelled) {
           const { title, desc } = describeError(err);
