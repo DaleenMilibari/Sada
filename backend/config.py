@@ -65,18 +65,7 @@ META_GRAPH_API_VERSION = os.environ.get("META_GRAPH_API_VERSION", "v23.0")
 # Once an account's window is backfilled, each run re-reads only this many recent days.
 INSTAGRAM_REFRESH_DAYS = int(os.environ.get("INSTAGRAM_REFRESH_DAYS", "7"))
 INSTAGRAM_MAX_PAGES_PER_ACCOUNT = int(os.environ.get("INSTAGRAM_MAX_PAGES_PER_ACCOUNT", "10"))
-# "meta" (official Graph API, the default) or "apify" (third-party scraper, see
-# backend/agents/apify_instagram_client.py for the trade-offs).
-INSTAGRAM_PROVIDER = os.environ.get("INSTAGRAM_PROVIDER", "meta").strip().lower()
-APIFY_API_TOKEN = os.environ.get("APIFY_API_TOKEN", "")
-APIFY_INSTAGRAM_ACTOR = os.environ.get("APIFY_INSTAGRAM_ACTOR", "apify~instagram-scraper")
-APIFY_RESULTS_LIMIT_PER_ACCOUNT = int(os.environ.get("APIFY_RESULTS_LIMIT_PER_ACCOUNT", "300"))
-# Apify bills per result, so each account is fetched at most this often (the collector itself runs more often).
-APIFY_MIN_INTERVAL_MINUTES = int(os.environ.get("APIFY_MIN_INTERVAL_MINUTES", "360"))
-if INSTAGRAM_PROVIDER == "apify":
-    INSTAGRAM_ENABLED = bool(APIFY_API_TOKEN)
-else:
-    INSTAGRAM_ENABLED = bool(META_ACCESS_TOKEN and INSTAGRAM_BUSINESS_ACCOUNT_ID)
+INSTAGRAM_ENABLED = bool(META_ACCESS_TOKEN and INSTAGRAM_BUSINESS_ACCOUNT_ID)
 
 # --- Data Collector agent (X API v2, app-only bearer token) -------------------
 # Pay-per-use: ~$0.005 per post read. Each post is read once (see x_collector.py).
