@@ -102,7 +102,14 @@ In the Graph API Explorer, with the long-lived token, run (replace the id):
 - **Data comes back** → the setup works, and this is a real business account.
 - **Error "Invalid user id" or similar** → wrong handle, or not a business account.
 
-Now check the handles already in `SBA_INSTAGRAM_ACCOUNTS`: `sbagovsa`, `saudia.sa`, `alekhbariya.tv`, `riyadiyatv` and `sbc_channel` (their profiles and posts match each channel, from the scrape of 17 Oct). Each must return data from the query above. To add another SBA entity (remember that 5 of our 8 original YouTube handles turned out wrong):
+Now check the handles already in `SBA_INSTAGRAM_ACCOUNTS`: `sbagovsa`, `saudia.sa`, `alekhbariya.tv`, `riyadiyatv` and `sbc_channel` (their profiles and posts match each channel, from the scrape of 17 Oct). Each must return data from the query above. With both values in `backend/.env`, one command checks them all (one Graph API call per handle):
+
+```bash
+python -m backend.instagram_verify --registry           # every handle in SBA_INSTAGRAM_ACCOUNTS
+python -m backend.instagram_verify some_handle other    # candidate handles
+```
+
+To add another SBA entity (remember that 5 of our 8 original YouTube handles turned out wrong):
 1. Search Instagram for the channel's Arabic name.
 2. Accept a handle only if **at least two** of these hold:
    - it has the blue verified badge
