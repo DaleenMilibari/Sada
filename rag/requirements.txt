@@ -1,0 +1,4 @@
+# RAG toolkit (rag/README.md) - separate from the backend's requirements.
+chromadb
+sentence-transformers
+python-dotenv
