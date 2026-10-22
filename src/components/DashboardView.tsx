@@ -6,7 +6,8 @@ import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList
 } from 'recharts';
 import { ApiError, apiFetch, describeError, ALL_DAYS, daysLabel } from '../lib/api';
-import { ContextBar, ScopeTag, Segmented, periodLabel } from './ContextBar';
+import { periodLabel } from '../lib/period';
+import { ContextBar, ScopeTag, Segmented } from './ContextBar';
 import type { AnalyticsSummary, Platform, OptimizerDraft } from '../types';
 import TrendingPanel from './TrendingPanel';
 import PublishingPlaybook from './PublishingPlaybook';

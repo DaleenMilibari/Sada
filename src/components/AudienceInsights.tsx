@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ClipboardCheck, Copy, ExternalLink, Lightbulb, Loader2, Sparkles, Target, Wand2 } from 'lucide-react';
 import { apiFetch, describeError } from '../lib/api';
+import { audienceShares } from '../lib/audience';
 import { ScopeTag } from './ContextBar';
 import type { AudienceAccuracy, AudienceSummary, AudienceThemes, OptimizerDraft, Platform, ReviewItem } from '../types';
 
 const PLATFORM_LABEL: Record<Platform, string> = { youtube: 'يوتيوب', instagram: 'إنستغرام', x: 'إكس' };
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
-export const INTENT_LABEL: Record<string, string> = {
+const INTENT_LABEL: Record<string, string> = {
   praise: 'إشادة',
   criticism: 'انتقاد',
   request: 'طلب أو اقتراح',
@@ -38,13 +39,6 @@ function Shell({ title, subtitle, icon, children, action }: {
 }
 
 // ── The page in a few sentences: computed from the data, no model involved ──
-
-export function audienceShares(summary: AudienceSummary) {
-  const count = (k: string) => summary.intents.find((i) => i.intent === k)?.count ?? 0;
-  const classified = summary.totals.classified;
-  const directed = classified - count('reaction') - count('other');
-  return { classified, directed, count };
-}
 
 export function InsightsCard({ summary }: { summary: AudienceSummary }) {
   const { classified, directed, count } = audienceShares(summary);

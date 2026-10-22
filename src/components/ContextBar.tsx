@@ -1,11 +1,5 @@
 import type { ReactNode } from 'react';
 import { Pin } from 'lucide-react';
-import { ALL_DAYS } from '../lib/api';
-
-export function periodLabel(days: number, spanDays?: number | null): string {
-  if (days < ALL_DAYS) return `آخر ${days} يوماً`;
-  return spanDays ? `كل الفترة (${spanDays} يوماً)` : 'كل الفترة';
-}
 
 export function Segmented<T extends string | number>({
   options, value, onChange,

@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { ExternalLink, Heart, Loader2, MessageCircle, MessagesSquare, Smile, Target, TrendingUp } from 'lucide-react';
 import { apiFetch, describeError, ALL_DAYS, daysLabel } from '../lib/api';
 import type { AudienceSummary, AudienceThemes, OptimizerDraft, Platform, SentimentStats } from '../types';
-import { AccuracyPanel, audienceShares, InsightsCard, ThemesCard } from './AudienceInsights';
-import { ContextBar, Segmented, periodLabel } from './ContextBar';
+import { audienceShares } from '../lib/audience';
+import { periodLabel } from '../lib/period';
+import { AccuracyPanel, InsightsCard, ThemesCard } from './AudienceInsights';
+import { ContextBar, Segmented } from './ContextBar';
 
 interface AudienceViewProps {
   onNotify?: (title: string, desc?: string, type?: 'success' | 'info') => void;
