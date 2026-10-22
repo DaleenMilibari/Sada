@@ -172,7 +172,7 @@ Every agent is specified with the same Agentic AI fields: Goal, Input, Trigger, 
 
 - **Goal:** Find engagement spikes during a live broadcast and flag them as social-clip opportunities.
 - **Input:** A timestamped engagement signal aligned to broadcast segments. **Currently a simulated signal** (`backend/data/broadcast_mock.json`); there is no live feed.
-- **Trigger:** `POST /api/broadcast/detect-clips`, `GET /api/broadcast/signal`. Not shown in the UI.
+- **Trigger:** `POST /api/broadcast/detect-clips`, `GET /api/broadcast/signal`, both called by the «لقطات البث المباشر» view (`src/components/LiveClipsView.tsx`), which labels the signal as simulated.
 - **Reasoning task:** Separate a real spike from normal fluctuation using a rolling baseline, and tie it to the segment it happened in.
 - **Action/output:** `ClipOpportunity[]` = `{start_time, end_time, segment_label, spike_magnitude, confidence}`, ranked.
 - **Evidence:** Deviation from the baseline plus the aligned segment.

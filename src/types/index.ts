@@ -1,4 +1,4 @@
-export type ActiveView = 'dashboard' | 'optimizer' | 'broadcast' | 'audience';
+export type ActiveView = 'dashboard' | 'optimizer' | 'broadcast' | 'live' | 'audience';
 
 export interface NotificationItem {
   id: string;
@@ -132,6 +132,36 @@ export interface DiagnosisResult {
   recommendations: string[];
   low_confidence: boolean;
   from_cache?: boolean;
+}
+
+// --- Live Clip Detection (mirrors backend/schemas.py) ---
+
+export interface BroadcastSignalPoint {
+  timestamp_seconds: number;
+  engagement_level: number;
+}
+
+export interface BroadcastSegment {
+  start_seconds: number;
+  end_seconds: number;
+  label: string;
+}
+
+export interface BroadcastSnapshot {
+  signal: BroadcastSignalPoint[];
+  segments: BroadcastSegment[];
+}
+
+export interface ClipOpportunityDetail {
+  start_time: number;
+  end_time: number;
+  segment_label: string;
+  spike_magnitude: number;
+  confidence: number;
+}
+
+export interface ClipOpportunity {
+  clip_opportunity: ClipOpportunityDetail;
 }
 
 // --- Audience analysis (mirrors backend/schemas.py::AudienceSummary) ---

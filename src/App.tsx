@@ -10,6 +10,7 @@ const DashboardView = lazy(() => import('./components/DashboardView'));
 const OptimizerView = lazy(() => import('./components/OptimizerView'));
 const AlertsView = lazy(() => import('./components/BroadcastView'));
 const AudienceView = lazy(() => import('./components/AudienceView'));
+const LiveClipsView = lazy(() => import('./components/LiveClipsView'));
 
 const VIEW_TITLES: Record<ActiveView, { title: string; subtitle: string }> = {
   dashboard: {
@@ -24,6 +25,10 @@ const VIEW_TITLES: Record<ActiveView, { title: string; subtitle: string }> = {
     title: 'التنبيهات والتشخيص',
     subtitle: 'رصد القفزات والانخفاضات وتشخيص أسبابها بالأدلة',
   },
+  live: {
+    title: 'لقطات البث المباشر',
+    subtitle: 'رصد قفزات التفاعل أثناء البث واقتراح لقطات للنشر · إشارة محاكاة حالياً',
+  },
   audience: {
     title: 'تحليل الجمهور',
     subtitle: 'مشاعر الجمهور وطلباته ونمو المتابعين من تعليقات وردود حقيقية',
@@ -36,6 +41,7 @@ const VIEW_NOTIFICATION_TYPE: Record<ActiveView, NotificationItem['type']> = {
   dashboard: 'report',
   optimizer: 'optimize',
   broadcast: 'viral',
+  live: 'viral',
   audience: 'report',
 };
 
@@ -327,6 +333,7 @@ export default function App() {
             {activeView === 'dashboard' && <DashboardView onNotify={showToast} onCreateDraft={openOptimizer} />}
             {activeView === 'optimizer' && <OptimizerView key={optimizerDraft?.text ?? 'blank'} onNotify={showToast} initialDraft={optimizerDraft} />}
             {activeView === 'broadcast' && <AlertsView onNotify={showToast} />}
+            {activeView === 'live' && <LiveClipsView onNotify={showToast} />}
             {activeView === 'audience' && <AudienceView onNotify={showToast} onCreateDraft={openOptimizer} />}
           </Suspense>
         </div>

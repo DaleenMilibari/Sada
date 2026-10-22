@@ -24,7 +24,7 @@ All agents share one database and one pattern store.
 4. **📈 Trend & Viral Prediction:** ranks what's trending now, gives each video a viral score, predicts its day-7 views, and backtests its own accuracy against a naive baseline.
 5. **🚨 Alerts & Diagnosis:** flags posts that spike or drop compared with their peers at the same age, then explains why a flagged post over- or under-performed. It names the root causes a team controls (posting in a burst, crowding, a weak time slot, a weak format), measured on the account's own history, and compares the post with similar real posts. Every factor has an evidence link.
 6. **💬 Audience Analysis:** classifies YouTube, Instagram and X comments by sentiment and intent (praise, criticism, request, question, reaction), using Saudi dialect cues. It groups them into themes, measures its own accuracy against blind human labels, and tracks follower growth. It reports aggregates only and stores no author data.
-7. **🎬 Live Clip Detection:** detects engagement spikes in a broadcast signal and maps them to segments. Backend only, and runs on a simulated signal.
+7. **🎬 Live Clip Detection:** detects engagement spikes in a broadcast signal and maps them to segments, shown in the «لقطات البث المباشر» view. It still runs on a simulated signal, and the page says so.
 
 ---
 
@@ -105,6 +105,7 @@ Only the lead holds `YOUTUBE_API_KEY` and `X_BEARER_TOKEN`. Everyone else works 
 | Trends & Prediction | `backend/agents/trend_prediction_agent.py`, `src/components/TrendingPanel.tsx`, `AccuracyCard.tsx` |
 | Dashboard & Delivery | `backend/analytics.py`, `src/components/DashboardView.tsx`, `ContextBar.tsx`, `src/App.tsx`, `Sidebar.tsx`, `vercel.json`, `.github/workflows/ci.yml` |
 | Alerts & Diagnosis | `backend/agents/alerts_diagnosis_agent.py`, `root_cause.py`, `src/components/BroadcastView.tsx` (Alerts view), `AlertsPanel.tsx` |
+| Live clips | `backend/agents/live_clip_detection_agent.py`, `src/components/LiveClipsView.tsx` |
 | Audience | `backend/agents/audience_agent.py`, `src/components/AudienceView.tsx`, `AudienceInsights.tsx` |
 
 **Shared files:** append only, inside your own `# --- Task N ---` block: `backend/api.py`, `backend/schemas.py`, `src/types/index.ts`.

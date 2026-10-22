@@ -1,4 +1,4 @@
-import { BarChart3, Wand2, BellRing, ChevronLeft, ShieldCheck, Users } from 'lucide-react';
+import { BarChart3, Wand2, BellRing, ChevronLeft, Radio, ShieldCheck, Users } from 'lucide-react';
 import type { ActiveView } from '../types';
 
 interface SidebarProps {
@@ -21,6 +21,11 @@ const navItems: { id: ActiveView; icon: React.ReactNode; label: string }[] = [
     id: 'broadcast',
     icon: <BellRing className="w-5 h-5" />,
     label: 'التنبيهات والتشخيص',
+  },
+  {
+    id: 'live',
+    icon: <Radio className="w-5 h-5" />,
+    label: 'لقطات البث المباشر',
   },
   {
     id: 'audience',
