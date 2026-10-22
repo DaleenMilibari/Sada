@@ -195,7 +195,7 @@ export default function AudienceView({ onNotify, onCreateDraft }: AudienceViewPr
 
       {summary && t && !empty && (
         <>
-          <InsightsCard summary={summary} themes={themes} />
+          <InsightsCard summary={summary} />
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             <Kpi

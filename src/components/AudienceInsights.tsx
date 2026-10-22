@@ -46,7 +46,7 @@ export function audienceShares(summary: AudienceSummary) {
   return { classified, directed, count };
 }
 
-export function InsightsCard({ summary, themes }: { summary: AudienceSummary; themes: AudienceThemes | null }) {
+export function InsightsCard({ summary }: { summary: AudienceSummary }) {
   const { classified, directed, count } = audienceShares(summary);
   if (classified < 10) return null;
   const lines: React.ReactNode[] = [];
